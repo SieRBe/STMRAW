@@ -334,6 +334,19 @@ bool checkAndReinitializeSD() {
             if (SD.begin(SPI1_NSS_PIN)) {
                 Serial.println("✅ [SD] Successfully reinitialized!");
                 
+                // VALIDATE FILE ACCESS CAPABILITY
+                Serial.println("🧪 [SD] Testing file access after reinit...");
+                File testAccess = SD.open("/SOCi2.csv", FILE_WRITE);
+                if (testAccess) {
+                    testAccess.close();
+                    Serial.println("✅ [SD] File access test SUCCESS!");
+                } else {
+                    Serial.println("❌ [SD] File access test FAILED - retrying...");
+                    digitalWrite(SPI1_NSS_PIN, HIGH);
+                    delay(500);
+                    continue;  // Try next attempt
+                }
+                
                 // Pastikan file CSV masih ada, jika tidak buat ulang
                 if (!SD.exists("/SOCi2.csv") || !SD.exists("/BMS.csv") || !SD.exists("/Energi.csv")) {
                     Serial.println("📋 [SD] CSV files missing, recreating...");
@@ -366,8 +379,18 @@ bool checkAndReinitializeSD() {
         return false;
         
     } else {
-        // SD card OK, tutup file dan return success
+        // SD card OK, tutup file dan VALIDATE FILE ACCESS
         root.close();
+        
+        // Test actual file access capability
+        File testFile = SD.open("/SOCi2.csv", FILE_WRITE);
+        if (!testFile) {
+            Serial.println("⚠️ [SD] Directory OK but file access FAILED!");
+            digitalWrite(SPI1_NSS_PIN, HIGH);
+            // Force reinit since directory is OK but file access fails
+            return checkAndReinitializeSD();
+        }
+        testFile.close();
         
         // Jika sebelumnya pernah dicabut, beri notifikasi recovery
         if (sdCardWasRemoved) {
@@ -682,8 +705,24 @@ void writeSOCi2FromBuffer() {
         DataRecord& data = fifoBuffer[index];
         
         if (data.pendingWrites & 1) {  // Check bit 0
-            File file = SD.open("/SOCi2.csv", FILE_WRITE);
-            if (file) {
+            // Try multiple times to open file
+            File file;
+            bool fileOpened = false;
+            
+            for (int openAttempt = 1; openAttempt <= 3; openAttempt++) {
+                file = SD.open("/SOCi2.csv", FILE_WRITE);
+                if (file) {
+                    fileOpened = true;
+                    break;
+                } else {
+                    Serial.print("❌ [SOCi2] File open attempt ");
+                    Serial.print(openAttempt);
+                    Serial.println("/3 failed");
+                    delay(100);  // Short delay between attempts
+                }
+            }
+            
+            if (fileOpened) {
                 file.print(data.no); file.print(", ");
                 file.print(data.waktu); file.print(", ");
                 file.print(interval); file.print(", ");
@@ -723,8 +762,23 @@ void writeSOCi2FromBuffer() {
                     delay(50);  // SPI stabilization
                     
                     // RETRY WRITE SETELAH RECOVERY
-                    File retryFile = SD.open("/SOCi2.csv", FILE_WRITE);
-                    if (retryFile) {
+                    File retryFile;
+                    bool retryOpened = false;
+                    
+                    for (int retryAttempt = 1; retryAttempt <= 3; retryAttempt++) {
+                        retryFile = SD.open("/SOCi2.csv", FILE_WRITE);
+                        if (retryFile) {
+                            retryOpened = true;
+                            break;
+                        } else {
+                            Serial.print("❌ [SOCi2] Retry open attempt ");
+                            Serial.print(retryAttempt);
+                            Serial.println("/3 failed");
+                            delay(200);
+                        }
+                    }
+                    
+                    if (retryOpened) {
                         retryFile.print(data.no); retryFile.print(", ");
                         retryFile.print(data.waktu); retryFile.print(", ");
                         retryFile.print(interval); retryFile.print(", ");
@@ -746,8 +800,23 @@ void writeSOCi2FromBuffer() {
                         Serial.println("❌ [SOCi2] RETRY FAILED - File still not accessible");
                         // Try one more time with extended delay
                         delay(500);
-                        File finalRetry = SD.open("/SOCi2.csv", FILE_WRITE);
-                        if (finalRetry) {
+                        File finalRetry;
+                        bool finalOpened = false;
+                        
+                        for (int finalAttempt = 1; finalAttempt <= 3; finalAttempt++) {
+                            finalRetry = SD.open("/SOCi2.csv", FILE_WRITE);
+                            if (finalRetry) {
+                                finalOpened = true;
+                                break;
+                            } else {
+                                Serial.print("❌ [SOCi2] Final attempt ");
+                                Serial.print(finalAttempt);
+                                Serial.println("/3 failed");
+                                delay(300);
+                            }
+                        }
+                        
+                        if (finalOpened) {
                             finalRetry.print(data.no); finalRetry.print(", ");
                             finalRetry.print(data.waktu); finalRetry.print(", ");
                             finalRetry.print(interval); finalRetry.print(", ");
