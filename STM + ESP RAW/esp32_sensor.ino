@@ -4,9 +4,8 @@
 #include <DallasTemperature.h>
 #include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
-#include <esp_wpa2.h>
+#include "esp_wpa2.h"
 #include <time.h>
-#include <esp_sntp.h>
 
 // === Pin UART ke STM32 ===
 #define STM32_RX 16  // RX2 ESP32 (menerima dari  STM32 TX)
@@ -21,20 +20,21 @@
 #define DS18B20_PIN_2 5
 
 // === WiFi WPA2-Enterprise Configuration ===
-#define EAP_IDENTITY "your_username"       // Ganti dengan username Anda
-#define EAP_PASSWORD "your_password"       // Ganti dengan password Anda
-#define WIFI_SSID "UNS_Mahasiswa"         // Ganti dengan SSID WPA2-Enterprise
+#define EAP_IDENTITY "your_username@student.uns.ac.id"
+#define EAP_USERNAME "your_username@student.uns.ac.id"
+#define EAP_PASSWORD "your_password"
+const char* ssid = "UNS_Mahasiswa";  // Ganti dengan SSID yang sesuai
 
 // === NTP Configuration ===
-#define NTP_SERVER "pool.ntp.org"
-#define GMT_OFFSET_SEC 25200               // GMT+7 untuk Indonesia (7*3600)
-#define DAYLIGHT_OFFSET_SEC 0              // Tidak ada daylight saving
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 25200;      // WIB = GMT+7 (7*3600)
+const int daylightOffset_sec = 0;      // Indonesia tidak menggunakan DST
 
 // === Status flags ===
 bool wifiConnected = false;
 bool ntpSynced = false;
 unsigned long lastWifiCheck = 0;
-const unsigned long wifiCheckInterval = 30000;  // Check WiFi every 30 seconds
+const unsigned long wifiCheckInterval = 5000;  // Check WiFi every 5 seconds
 
 // === Objek sensor ===
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
@@ -54,12 +54,29 @@ const unsigned long sendInterval = 10000;  // Kirim setiap 10 detik (sesuai STM3
 unsigned long lastLCDUpdate = 0;
 const unsigned long lcdUpdateInterval = 1000;  // Update LCD setiap 1 detik
 
+// === Timer untuk NTP sync ===
+unsigned long lastNTPSync = 0;
+const unsigned long ntpSyncInterval = 3600000;  // Sync NTP setiap 1 jam
+
 // === Counter untuk debugging ===
 int sendCount = 0;
 
-// ===== FUNGSI WIFI WPA2-ENTERPRISE =====
+// ===== FUNGSI WIFI STATUS (dari kode 2) =====
+void printWiFiStatus() {
+  wl_status_t status = WiFi.status();
+  Serial.print("Status WiFi: ");
+  switch (status) {
+    case WL_CONNECTED:      Serial.println("TERHUBUNG ✅"); break;
+    case WL_DISCONNECTED:   Serial.println("TERPUTUS ❌"); break;
+    case WL_NO_SSID_AVAIL:  Serial.println("SSID tidak tersedia ⚠️"); break;
+    case WL_CONNECT_FAILED: Serial.println("Gagal menyambung ❌"); break;
+    default:                Serial.println("Status tidak diketahui..."); break;
+  }
+}
+
+// ===== FUNGSI WIFI WPA2-ENTERPRISE (diperbaiki dari kode 2) =====
 void connectToWiFi() {
-  Serial.println("\n🌐 [WiFi] Connecting to WPA2-Enterprise...");
+  Serial.println("\n=== Menghubungkan ke WiFi WPA2-Enterprise ===");
   
   // Disconnect jika sudah terhubung
   WiFi.disconnect(true);
@@ -69,93 +86,90 @@ void connectToWiFi() {
   WiFi.mode(WIFI_STA);
   
   // Configure WPA2-Enterprise
-  esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)EAP_IDENTITY, strlen(EAP_IDENTITY));
-  esp_wifi_sta_wpa2_ent_set_username((uint8_t *)EAP_IDENTITY, strlen(EAP_IDENTITY));
-  esp_wifi_sta_wpa2_ent_set_password((uint8_t *)EAP_PASSWORD, strlen(EAP_PASSWORD));
   esp_wifi_sta_wpa2_ent_enable();
+  esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)EAP_IDENTITY, strlen(EAP_IDENTITY));
+  esp_wifi_sta_wpa2_ent_set_username((uint8_t *)EAP_USERNAME, strlen(EAP_USERNAME));
+  esp_wifi_sta_wpa2_ent_set_password((uint8_t *)EAP_PASSWORD, strlen(EAP_PASSWORD));
   
   // Start WiFi connection
-  WiFi.begin(WIFI_SSID);
+  WiFi.begin(ssid);
+  Serial.printf("Menyambung ke SSID: %s\n", ssid);
+  Serial.printf("Username: %s\n", EAP_USERNAME);
   
-  Serial.print("📡 Connecting to ");
-  Serial.print(WIFI_SSID);
-  Serial.print(" as ");
-  Serial.print(EAP_IDENTITY);
-  Serial.println("...");
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(1000);
-    Serial.print(".");
-    attempts++;
+  int retry = 0;
+  while (WiFi.status() != WL_CONNECTED && retry < 40) {
+    printWiFiStatus();
+    delay(500);
+    retry++;
   }
   
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
-    Serial.println("\n✅ [WiFi] Connected!");
-    Serial.print("📶 IP Address: ");
+    Serial.println("✅ WiFi Tersambung!");
+    Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-    Serial.print("📡 Signal Strength: ");
+    Serial.print("Signal Strength: ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
   } else {
     wifiConnected = false;
-    Serial.println("\n❌ [WiFi] Connection failed!");
+    Serial.println("❌ Gagal menyambung WiFi setelah beberapa percobaan.");
     Serial.println("⚠️  Please check credentials and network availability");
   }
 }
 
-// ===== FUNGSI NTP TIME SYNC =====
-void initializeNTP() {
+// ===== FUNGSI NTP TIME SYNC (dari kode 2) =====
+void syncNTP() {
   if (!wifiConnected) {
     Serial.println("❌ [NTP] WiFi not connected, skipping NTP setup");
     return;
   }
   
-  Serial.println("🕐 [NTP] Initializing time synchronization...");
+  Serial.println("🕐 [NTP] Sinkronisasi waktu NTP...");
   
-  // Configure NTP
-  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+  // Configure NTP dengan cara yang lebih sederhana
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   
   // Wait for time sync
   Serial.print("⏳ Syncing time");
-  int syncAttempts = 0;
-  while (!time(nullptr) && syncAttempts < 30) {
-    delay(1000);
+  int retries = 0;
+  while (time(nullptr) < 100000 && retries < 10) {
+    delay(500);
     Serial.print(".");
-    syncAttempts++;
+    retries++;
   }
+  Serial.println();
   
-  if (time(nullptr)) {
+  if (time(nullptr) > 100000) {
     ntpSynced = true;
-    Serial.println("\n✅ [NTP] Time synchronized!");
-    
-    // Display current time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-      Serial.print("🕐 Current time: ");
-      Serial.println(getFormattedTime());
-    }
+    Serial.println("✅ [NTP] NTP tersinkronisasi!");
+    printLocalTime();
   } else {
     ntpSynced = false;
-    Serial.println("\n❌ [NTP] Time sync failed!");
+    Serial.println("❌ [NTP] Gagal sinkronisasi NTP");
   }
 }
 
-// ===== FUNGSI GET FORMATTED TIMESTAMP =====
+// ===== FUNGSI GET FORMATTED TIMESTAMP (dari kode 2) =====
 String getFormattedTime() {
   if (!ntpSynced) {
     return "TIME_NOT_SYNCED";
   }
   
+  time_t now;
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    return "TIME_ERROR";
-  }
+  time(&now);
+  localtime_r(&now, &timeinfo);
   
-  char timeStr[20];
-  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
-  return String(timeStr);
+  char buffer[30];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  return String(buffer);
+}
+
+// ===== FUNGSI PRINT LOCAL TIME =====
+void printLocalTime() {
+  Serial.print("Waktu sekarang: ");
+  Serial.println(getFormattedTime());
 }
 
 // ===== FUNGSI GET UNIX TIMESTAMP =====
@@ -169,26 +183,46 @@ unsigned long getUnixTimestamp() {
   return (unsigned long)now;
 }
 
-// ===== FUNGSI CHECK WIFI STATUS =====
+// ===== FUNGSI CHECK WIFI STATUS (diperbaiki) =====
 void checkWiFiStatus() {
+  printWiFiStatus();
+  
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiConnected) {
       Serial.println("⚠️  [WiFi] Connection lost! Attempting reconnection...");
       wifiConnected = false;
       ntpSynced = false;
     }
-    connectToWiFi();
-    if (wifiConnected) {
-      initializeNTP();
+    
+    // Coba reconnect dulu
+    Serial.println("⚠️ WiFi terputus, mencoba reconnect...");
+    WiFi.reconnect();
+    
+    // Tunggu sebentar
+    delay(2000);
+    
+    // Jika masih gagal, coba koneksi ulang penuh
+    if (WiFi.status() != WL_CONNECTED) {
+      connectToWiFi();
+      if (wifiConnected) {
+        syncNTP();
+      }
+    } else {
+      wifiConnected = true;
+      Serial.println("✅ WiFi reconnect berhasil!");
     }
   }
 }
 
 void setup() {
   Serial.begin(115200);  // Debug monitor
-  delay(1000);
+  delay(3000);  // Tunggu serial monitor siap
   
-  Serial.println("\n\n========== ESP32: STARTUP ==========");
+  while(!Serial && millis() < 5000) {
+    delay(10);
+  }
+  
+  Serial.println("\n\n\n========== ESP32: STARTUP ==========");
   Serial.println("Initializing sensors...\n");
 
   // --- Inisialisasi UART ke STM32 ---
@@ -236,7 +270,7 @@ void setup() {
   lcd.setCursor(0, 0);
   lcd.print("Connecting WiFi...");
   lcd.setCursor(0, 1);
-  lcd.print(WIFI_SSID);
+  lcd.print(ssid);
   
   connectToWiFi();
   
@@ -244,10 +278,15 @@ void setup() {
     lcd.setCursor(0, 2);
     lcd.print("WiFi: Connected");
     lcd.setCursor(0, 3);
-    lcd.print(WiFi.localIP().toString());
+    String ipStr = WiFi.localIP().toString();
+    if (ipStr.length() > 20) {
+      ipStr = ipStr.substring(0, 20);
+    }
+    lcd.print(ipStr);
     
     // --- Inisialisasi NTP ---
-    initializeNTP();
+    syncNTP();
+    lastNTPSync = millis();
     
     if (ntpSynced) {
       Serial.println("✅ All systems initialized successfully!");
@@ -286,10 +325,16 @@ void setup() {
 void loop() {
   unsigned long currentTime = millis();
 
-  // Check WiFi status setiap 30 detik
+  // Check WiFi status setiap 5 detik
   if (currentTime - lastWifiCheck >= wifiCheckInterval) {
     lastWifiCheck = currentTime;
     checkWiFiStatus();
+  }
+
+  // Sync NTP setiap 1 jam jika WiFi terhubung
+  if (wifiConnected && (currentTime - lastNTPSync >= ntpSyncInterval)) {
+    lastNTPSync = currentTime;
+    syncNTP();
   }
 
   // Kirim data setiap sendInterval (10 detik)
@@ -437,12 +482,14 @@ void updateLCDDisplay() {
   
   // Tampilkan waktu singkat di kanan bawah jika NTP tersync
   if (ntpSynced) {
+    time_t now;
     struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-      lcd.setCursor(12, 3);
-      char timeStr[9];
-      strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-      lcd.print(timeStr);
-    }
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    
+    lcd.setCursor(12, 3);
+    char timeStr[9];
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+    lcd.print(timeStr);
   }
 }
