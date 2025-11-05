@@ -712,8 +712,15 @@ void writeSOCi2FromBuffer() {
                 Serial.println("❌ [SOCi2] Failed to open file for writing");
                 // Coba cek dan reinit SD card jika file gagal dibuka
                 Serial.println("🔄 [SOCi2] Attempting SD card recovery...");
+                digitalWrite(SPI1_NSS_PIN, HIGH);  // Release SPI first
+                delay(200);  // Give time for SPI release
+                
                 if (checkAndReinitializeSD()) {
                     Serial.println("✅ [SOCi2] SD card recovered, retrying write immediately...");
+                    
+                    // Reset SPI state for retry
+                    digitalWrite(SPI1_NSS_PIN, LOW);
+                    delay(50);  // SPI stabilization
                     
                     // RETRY WRITE SETELAH RECOVERY
                     File retryFile = SD.open("/SOCi2.csv", FILE_WRITE);
@@ -737,6 +744,29 @@ void writeSOCi2FromBuffer() {
                         data.pendingWrites &= ~1;  // Clear bit 0
                     } else {
                         Serial.println("❌ [SOCi2] RETRY FAILED - File still not accessible");
+                        // Try one more time with extended delay
+                        delay(500);
+                        File finalRetry = SD.open("/SOCi2.csv", FILE_WRITE);
+                        if (finalRetry) {
+                            finalRetry.print(data.no); finalRetry.print(", ");
+                            finalRetry.print(data.waktu); finalRetry.print(", ");
+                            finalRetry.print(interval); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_v_pv, 2); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_i_pv, 3); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_p_pv, 1); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_e_pv, 0); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_v_batt, 2); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_i_batt, 3); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_p_batt, 1); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_e_batt, 0); finalRetry.print(", ");
+                            finalRetry.print(data.soci2_soc, 2); finalRetry.println();
+                            finalRetry.flush();
+                            finalRetry.close();
+                            Serial.println("🎯 [SOCi2] FINAL RETRY SUCCESS!");
+                            data.pendingWrites &= ~1;
+                        } else {
+                            Serial.println("❌ [SOCi2] ALL RETRIES FAILED - Will try next cycle");
+                        }
                     }
                 } else {
                     Serial.println("❌ [SOCi2] SD card recovery failed");
@@ -794,8 +824,15 @@ void writeBMSFromBuffer() {
                 Serial.println("❌ [BMS] Failed to open file for writing");
                 // Coba cek dan reinit SD card jika file gagal dibuka
                 Serial.println("🔄 [BMS] Attempting SD card recovery...");
+                digitalWrite(SPI1_NSS_PIN, HIGH);  // Release SPI first
+                delay(200);  // Give time for SPI release
+                
                 if (checkAndReinitializeSD()) {
                     Serial.println("✅ [BMS] SD card recovered, retrying write immediately...");
+                    
+                    // Reset SPI state for retry
+                    digitalWrite(SPI1_NSS_PIN, LOW);
+                    delay(50);  // SPI stabilization
                     
                     // RETRY WRITE SETELAH RECOVERY
                     File retryFile = SD.open("/BMS.csv", FILE_WRITE);
@@ -815,6 +852,25 @@ void writeBMSFromBuffer() {
                         data.pendingWrites &= ~2;  // Clear bit 1
                     } else {
                         Serial.println("❌ [BMS] RETRY FAILED - File still not accessible");
+                        // Try one more time with extended delay
+                        delay(500);
+                        File finalRetry = SD.open("/BMS.csv", FILE_WRITE);
+                        if (finalRetry) {
+                            finalRetry.print(data.no); finalRetry.print(", ");
+                            finalRetry.print(data.waktu); finalRetry.print(", ");
+                            finalRetry.print(data.bms_v1, 2); finalRetry.print(", ");
+                            finalRetry.print(data.bms_v2, 2); finalRetry.print(", ");
+                            finalRetry.print(data.bms_v3, 2); finalRetry.print(", ");
+                            finalRetry.print(data.bms_v4, 2); finalRetry.print(", ");
+                            finalRetry.print(data.bms_total_v, 2); finalRetry.print(", ");
+                            finalRetry.print(data.bms_soc, 1); finalRetry.println();
+                            finalRetry.flush();
+                            finalRetry.close();
+                            Serial.println("🎯 [BMS] FINAL RETRY SUCCESS!");
+                            data.pendingWrites &= ~2;
+                        } else {
+                            Serial.println("❌ [BMS] ALL RETRIES FAILED - Will try next cycle");
+                        }
                     }
                 } else {
                     Serial.println("❌ [BMS] SD card recovery failed");
@@ -876,8 +932,15 @@ void writeEnergiFromBuffer() {
                 Serial.println("❌ [Energi] Failed to open file for writing");
                 // Coba cek dan reinit SD card jika file gagal dibuka
                 Serial.println("🔄 [Energi] Attempting SD card recovery...");
+                digitalWrite(SPI1_NSS_PIN, HIGH);  // Release SPI first
+                delay(200);  // Give time for SPI release
+                
                 if (checkAndReinitializeSD()) {
                     Serial.println("✅ [Energi] SD card recovered, retrying write immediately...");
+                    
+                    // Reset SPI state for retry
+                    digitalWrite(SPI1_NSS_PIN, LOW);
+                    delay(50);  // SPI stabilization
                     
                     // RETRY WRITE SETELAH RECOVERY
                     File retryFile = SD.open("/Energi.csv", FILE_WRITE);
@@ -901,6 +964,29 @@ void writeEnergiFromBuffer() {
                         data.pendingWrites &= ~4;  // Clear bit 2
                     } else {
                         Serial.println("❌ [Energi] RETRY FAILED - File still not accessible");
+                        // Try one more time with extended delay
+                        delay(500);
+                        File finalRetry = SD.open("/Energi.csv", FILE_WRITE);
+                        if (finalRetry) {
+                            finalRetry.print(data.no); finalRetry.print(", ");
+                            finalRetry.print(data.waktu); finalRetry.print(", ");
+                            finalRetry.print(data.energi_p_batt, 1); finalRetry.print(", ");
+                            finalRetry.print(data.energi_e_batt, 0); finalRetry.print(", ");
+                            finalRetry.print(data.energi_soc, 2); finalRetry.print(", ");
+                            finalRetry.print(data.energi_plts_p, 1); finalRetry.print(", ");
+                            finalRetry.print(data.energi_plts_e, 0); finalRetry.print(", ");
+                            finalRetry.print(data.energi_grid_p, 1); finalRetry.print(", ");
+                            finalRetry.print(data.energi_grid_e, 0); finalRetry.print(", ");
+                            finalRetry.print(data.energi_lux, 1); finalRetry.print(", ");
+                            finalRetry.print(data.energi_temp1, 1); finalRetry.print(", ");
+                            finalRetry.print(data.energi_temp2, 1); finalRetry.println();
+                            finalRetry.flush();
+                            finalRetry.close();
+                            Serial.println("🎯 [Energi] FINAL RETRY SUCCESS!");
+                            data.pendingWrites &= ~4;
+                        } else {
+                            Serial.println("❌ [Energi] ALL RETRIES FAILED - Will try next cycle");
+                        }
                     }
                 } else {
                     Serial.println("❌ [Energi] SD card recovery failed");
