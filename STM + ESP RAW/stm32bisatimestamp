@@ -57,6 +57,13 @@ float espLux = 0.0, espTemp1 = 0.0, espTemp2 = 0.0;
 bool espDataReceived = false;
 unsigned long lastESP32Time = 0;
 
+// ===== VARIABEL GLOBAL TIMEREF =====
+unsigned long globalTimeRef = 0;        // Timestamp referensi global
+unsigned long globalTimeRefBaseMillis = 0; // Basis millis() saat timeref di-set
+bool timeRefAvailable = false;           // Flag ketersediaan timeref
+unsigned long lastTimeRefUpdate = 0;     // Terakhir kali timeref diupdate
+const unsigned long timeRefUpdateInterval = 300000; // Update timeref setiap 5 menit
+
 // ===== STRUKTUR DATA UNTUK FIFO BUFFER =====
 struct DataRecord {
     int no;
@@ -240,6 +247,10 @@ void setup() {
   // Inisialisasi file CSV di SD Card
   Serial.println("\nInitializing CSV files on SD Card...");
   initializeCSVFiles();
+  
+  // Inisialisasi TimeRef
+  Serial.println("\nInitializing TimeRef system...");
+  initializeTimeRef();
   
   Serial.println("========== STARTUP COMPLETE ==========\n");
 }
@@ -515,6 +526,174 @@ void debugSDCard() {
     Serial.println("=================== DEBUG COMPLETE ===================\n");
 }
 
+// ===== FUNGSI TIMEREF FILE MANAGEMENT =====
+void initializeTimeRef() {
+    digitalWrite(SPI1_NSS_PIN, LOW);
+    delay(10);
+    
+    // Cek apakah file timeref.txt sudah ada
+    if (SD.exists("/timeref.txt")) {
+        Serial.println("📅 [TIMEREF] Found existing timeref.txt, loading...");
+        loadTimeRefFromSD();
+    } else {
+        Serial.println("📅 [TIMEREF] No timeref.txt found, will create on first timestamp");
+        timeRefAvailable = false;
+        globalTimeRef = 0;
+        globalTimeRefBaseMillis = 0;
+    }
+    
+    digitalWrite(SPI1_NSS_PIN, HIGH);
+}
+
+bool loadTimeRefFromSD() {
+    digitalWrite(SPI1_NSS_PIN, LOW);
+    delay(10);
+    
+    File timeRefFile = SD.open("/timeref.txt", FILE_READ);
+    if (!timeRefFile) {
+        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for reading");
+        digitalWrite(SPI1_NSS_PIN, HIGH);
+        return false;
+    }
+    
+    String line = timeRefFile.readStringUntil('\n');
+    line.trim();
+    timeRefFile.close();
+    digitalWrite(SPI1_NSS_PIN, HIGH);
+    
+    if (line.length() > 0) {
+        globalTimeRef = line.toInt();
+        globalTimeRefBaseMillis = millis();
+        timeRefAvailable = true;
+        
+        Serial.print("✅ [TIMEREF] Loaded timestamp: ");
+        Serial.print(globalTimeRef);
+        Serial.print(" at millis: ");
+        Serial.println(globalTimeRefBaseMillis);
+        return true;
+    } else {
+        Serial.println("❌ [TIMEREF] Invalid timeref.txt content");
+        return false;
+    }
+}
+
+bool saveTimeRefToSD(unsigned long timestamp) {
+    if (!sdCardAvailable) {
+        Serial.println("❌ [TIMEREF] SD card not available, cannot save timeref");
+        return false;
+    }
+    
+    digitalWrite(SPI1_NSS_PIN, LOW);
+    delay(10);
+    
+    File timeRefFile = SD.open("/timeref.txt", FILE_WRITE);
+    if (!timeRefFile) {
+        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for writing");
+        digitalWrite(SPI1_NSS_PIN, HIGH);
+        return false;
+    }
+    
+    // Truncate file dan tulis timestamp baru
+    timeRefFile.seek(0);
+    timeRefFile.println(timestamp);
+    timeRefFile.flush();
+    timeRefFile.close();
+    digitalWrite(SPI1_NSS_PIN, HIGH);
+    
+    Serial.print("💾 [TIMEREF] Saved timestamp: ");
+    Serial.println(timestamp);
+    return true;
+}
+
+void updateTimeRef(unsigned long newTimestamp) {
+    // Update timestamp referensi global
+    globalTimeRef = newTimestamp;
+    globalTimeRefBaseMillis = millis();
+    timeRefAvailable = true;
+    lastTimeRefUpdate = millis();
+    
+    // Simpan ke SD card
+    saveTimeRefToSD(newTimestamp);
+    
+    Serial.print("🕐 [TIMEREF] Updated global timeref to: ");
+    Serial.print(globalTimeRef);
+    Serial.print(" (base millis: ");
+    Serial.print(globalTimeRefBaseMillis);
+    Serial.println(")");
+}
+
+unsigned long getCurrentTimestamp() {
+    if (!timeRefAvailable) {
+        // FALLBACK MECHANISM - prioritas:
+        // 1. ESP32 timestamp jika tersedia dan valid
+        // 2. Millis/1000 + base offset
+        
+        if (espTimestamp > 1000000 && espDataReceived) {
+            // Gunakan timestamp ESP32 jika valid dan data baru diterima
+            return espTimestamp;
+        } else {
+            // Fallback ke millis dengan base offset 1700000000 (sekitar 2023)
+            return 1700000000 + (millis() / 1000);
+        }
+    }
+    
+    // Hitung timestamp saat ini berdasarkan timeref + elapsed millis
+    unsigned long currentMillis = millis();
+    
+    // Handle millis overflow (reset setelah ~49 hari)
+    if (currentMillis < globalTimeRefBaseMillis) {
+        // Millis overflow terdeteksi, reset base
+        Serial.println("⚠️ [TIMEREF] Millis overflow detected, recalibrating...");
+        globalTimeRefBaseMillis = currentMillis;
+        // Simpan ulang timeref
+        saveTimeRefToSD(globalTimeRef);
+    }
+    
+    unsigned long elapsedSeconds = (currentMillis - globalTimeRefBaseMillis) / 1000;
+    unsigned long currentTimestamp = globalTimeRef + elapsedSeconds;
+    
+    return currentTimestamp;
+}
+
+String getFormattedTimestampFromRef() {
+    if (!timeRefAvailable) {
+        return "NO_TIMEREF";
+    }
+    
+    unsigned long timestamp = getCurrentTimestamp();
+    
+    // Simple formatting (akan lebih baik jika ada library time)
+    // Format: UNIX_TIMESTAMP untuk sekarang
+    return String(timestamp);
+}
+
+void debugTimeRef() {
+    Serial.println("\n=================== TIMEREF DEBUG ===================");
+    Serial.print("TimeRef Available: "); Serial.println(timeRefAvailable ? "YES" : "NO");
+    Serial.print("Global TimeRef: "); Serial.println(globalTimeRef);
+    Serial.print("Base Millis: "); Serial.println(globalTimeRefBaseMillis);
+    Serial.print("Current Millis: "); Serial.println(millis());
+    Serial.print("Current Timestamp: "); Serial.println(getCurrentTimestamp());
+    Serial.print("Last Update: "); Serial.print(millis() - lastTimeRefUpdate); Serial.println(" ms ago");
+    
+    // Test read timeref.txt
+    digitalWrite(SPI1_NSS_PIN, LOW);
+    if (SD.exists("/timeref.txt")) {
+        File timeRefFile = SD.open("/timeref.txt", FILE_READ);
+        if (timeRefFile) {
+            Serial.print("TimeRef File Content: ");
+            String content = timeRefFile.readStringUntil('\n');
+            Serial.println(content);
+            timeRefFile.close();
+        }
+    } else {
+        Serial.println("TimeRef File: NOT EXISTS");
+    }
+    digitalWrite(SPI1_NSS_PIN, HIGH);
+    
+    Serial.println("=================== TIMEREF DEBUG END ===================\n");
+}
+
 void postTransmission() {
   delay(3);
   digitalWrite(MAX485_RE, 0);
@@ -664,6 +843,15 @@ void receiveESP32Data() {
             espDataReceived = true;
             lastESP32Time = millis();
             
+            // UPDATE TIMEREF JIKA TIMESTAMP VALID DAN LEBIH BARU
+            if (espTimestamp > 1000000 && espTimestamp > globalTimeRef) {
+                // Timestamp valid (> 1000000 = sekitar tahun 1970+)
+                // dan lebih baru dari timeref yang ada
+                if (!timeRefAvailable || (millis() - lastTimeRefUpdate) >= timeRefUpdateInterval) {
+                    updateTimeRef(espTimestamp);
+                }
+            }
+            
             Serial.print("📡 [ESP32] Timestamp: ");
             Serial.print(espTimestamp);
             Serial.print(" | Lux: ");
@@ -714,7 +902,9 @@ void prepareCompleteData() {
     DataRecord newData;
     newData.no = count;
     strcpy(newData.waktu, waktu);
-    newData.timestamp = espTimestamp;  // Simpan timestamp dari ESP32
+    
+    // GUNAKAN TIMESTAMP DARI TIMEREF SEBAGAI SUMBER UTAMA
+    newData.timestamp = getCurrentTimestamp();  // Gunakan timeref global
     
     // Data untuk SOCi2.csv (DUMMY DATA untuk testing)
     newData.soci2_v_pv = 48.5 + (random(-10, 10) / 10.0);  // 48.5V ± random
@@ -756,7 +946,9 @@ void prepareCompleteData() {
     
     Serial.print("📝 [BUFFER] Data ditambahkan! Timestamp: ");
     Serial.print(newData.timestamp);
-    Serial.print(" | SOCi2 V_pv: ");
+    Serial.print(" (from ");
+    Serial.print(timeRefAvailable ? "TimeRef" : "Fallback");
+    Serial.print(") | SOCi2 V_pv: ");
     Serial.print(newData.soci2_v_pv, 1);
     Serial.print("V | BMS V1: ");
     Serial.print(newData.bms_v1, 2);
@@ -1326,6 +1518,33 @@ void loop() {
             Serial.print("ESP32 Data: "); Serial.println(espDataReceived ? "READY" : "WAITING");
             const char* stateNames[] = {"IDLE", "SOCI2", "BMS", "ENERGI", "CLEANUP"};
             Serial.print("Write State: "); Serial.println(stateNames[currentWriteState]);
+            Serial.print("TimeRef Available: "); Serial.println(timeRefAvailable ? "YES" : "NO");
+            Serial.print("Current Timestamp: "); Serial.println(getCurrentTimestamp());
+        } else if (command == "timeref" || command == "timeinfo") {
+            debugTimeRef();
+        } else if (command.startsWith("settime ")) {
+            // Command: settime 1730794225
+            String timestampStr = command.substring(8);
+            unsigned long newTimestamp = timestampStr.toInt();
+            if (newTimestamp > 1000000) {
+                updateTimeRef(newTimestamp);
+                Serial.print("✅ [TIMEREF] Manual timestamp set to: ");
+                Serial.println(newTimestamp);
+            } else {
+                Serial.println("❌ [TIMEREF] Invalid timestamp (must be > 1000000)");
+            }
+        } else if (command == "resettimeref") {
+            timeRefAvailable = false;
+            globalTimeRef = 0;
+            globalTimeRefBaseMillis = 0;
+            // Hapus file timeref.txt
+            digitalWrite(SPI1_NSS_PIN, LOW);
+            if (SD.exists("/timeref.txt")) {
+                SD.remove("/timeref.txt");
+                Serial.println("🗑️ [TIMEREF] Removed timeref.txt file");
+            }
+            digitalWrite(SPI1_NSS_PIN, HIGH);
+            Serial.println("🔄 [TIMEREF] Reset to fallback mode");
         }
     }
 
