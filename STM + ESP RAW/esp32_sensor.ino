@@ -234,7 +234,7 @@ void setup() {
   delay(500);
   
   // --- Inisialisasi LCD I2C ---
-  lcd.init();
+  lcd.begin();
   lcd.backlight();
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -493,3 +493,4 @@ void updateLCDDisplay() {
     lcd.print(timeStr);
   }
 }
+
