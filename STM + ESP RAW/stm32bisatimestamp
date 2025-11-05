@@ -168,7 +168,7 @@ void setup() {
   Serial3.begin(9600);  // Untuk komunikasi dengan ESP32 (9600 baud)
   delay(500);
   Serial.println("✓ Serial2 & Serial3 initialized");
-  Serial.println("ℹ️ Serial3: 9600 baud for ESP32 communication");
+  Serial.println("ℹ Serial3: 9600 baud for ESP32 communication");
 
   pinMode(SPI1_NSS_PIN, OUTPUT);
   digitalWrite(SPI1_NSS_PIN, HIGH);
@@ -274,7 +274,7 @@ void initializeCSVFiles() {
     if (!SD.exists("/SOCi2.csv")) {
         File file = SD.open("/SOCi2.csv", FILE_WRITE);
         if (file) {
-            file.println("No,Waktu,Timestamp,Interval (s),V PV (V),I PV (A),P PV (W),E PV (Wh),V Batt (V),I Batt (A),P Batt (W),E Batt (Wh),SOC (%)");
+            file.println("Waktu,Timestamp,Interval (s),V PV (V),I PV (A),P PV (W),E PV (Wh),V Batt (V),I Batt (A),P Batt (W),E Batt (Wh),SOC (%)");
             file.close();
             Serial.println("✓ SOCi2.csv created with header");
         } else {
@@ -302,7 +302,7 @@ void initializeCSVFiles() {
     if (!SD.exists("/Energi.csv")) {
         File file = SD.open("/Energi.csv", FILE_WRITE);
         if (file) {
-            file.println("No,Waktu,Timestamp,P Batt (W),E Batt (Wh),SOC (%),PLTS Power (W),PLTS Energy (Wh),Grid Power (W),Grid Energy (Wh),Lux (lx),Temp1 (C),Temp2 (C)");
+            file.println("Waktu;Timestamp;P Batt (W);E Batt (Wh);SOC (%);PLTS Power (W);PLTS Energy (Wh);Grid Power (W);Grid Energy (Wh);Lux (lx);Temp1 (C);Temp2 (C)");
             file.close();
             Serial.println("✓ Energi.csv created with header");
         } else {
@@ -320,7 +320,7 @@ void initializeCSVFiles() {
 bool checkAndReinitializeSD() {
     // Proteksi terhadap rekursi berlebihan
     if (isRecursiveCheck) {
-        Serial.println("🛡️ [SD] Recursive check prevented!");
+        Serial.println("🛡 [SD] Recursive check prevented!");
         return false;
     }
     
@@ -332,7 +332,7 @@ bool checkAndReinitializeSD() {
     if (!root) {
         // SD card tidak dapat diakses
         digitalWrite(SPI1_NSS_PIN, HIGH);
-        Serial.println("⚠️ [SD] Card not accessible, attempting reinitialization...");
+        Serial.println("⚠ [SD] Card not accessible, attempting reinitialization...");
         
         // Set flag bahwa SD card pernah dicabut
         if (!sdCardWasRemoved) {
@@ -405,7 +405,7 @@ bool checkAndReinitializeSD() {
         // Test actual file access capability
         File testFile = SD.open("/SOCi2.csv", FILE_WRITE);
         if (!testFile) {
-            Serial.println("⚠️ [SD] Directory OK but file access FAILED!");
+            Serial.println("⚠ [SD] Directory OK but file access FAILED!");
             digitalWrite(SPI1_NSS_PIN, HIGH);
             
             // Set rekursi flag dan coba reinit sekali saja
@@ -446,7 +446,7 @@ bool checkAndReinitializeSD() {
                     return false;
                 }
             } else {
-                Serial.println("🛡️ [SD] Recursive check blocked - marking SD as unavailable");
+                Serial.println("🛡 [SD] Recursive check blocked - marking SD as unavailable");
                 sdCardAvailable = false;
                 return false;
             }
@@ -503,7 +503,7 @@ void debugSDCard() {
     Serial.println(SD.exists("/Energi.csv") ? "EXISTS" : "MISSING");
     
     // Test 4: Coba tulis file test
-    Serial.println("✍️  Testing write capability...");
+    Serial.println("✍  Testing write capability...");
     File testFile = SD.open("/test.txt", FILE_WRITE);
     if (testFile) {
         testFile.println("SD Test - " + String(millis()));
@@ -531,12 +531,12 @@ void initializeTimeRef() {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    // Cek apakah file timeref.txt sudah ada
-    if (SD.exists("/timeref.txt")) {
-        Serial.println("📅 [TIMEREF] Found existing timeref.txt, loading...");
+    // Cek apakah file timeref.csv sudah ada
+    if (SD.exists("/timeref.csv")) {
+        Serial.println("📅 [TIMEREF] Found existing timeref.csv, loading...");
         loadTimeRefFromSD();
     } else {
-        Serial.println("📅 [TIMEREF] No timeref.txt found, will create on first timestamp");
+        Serial.println("📅 [TIMEREF] No timeref.csv found, will create on first timestamp");
         timeRefAvailable = false;
         globalTimeRef = 0;
         globalTimeRefBaseMillis = 0;
@@ -549,9 +549,9 @@ bool loadTimeRefFromSD() {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    File timeRefFile = SD.open("/timeref.txt", FILE_READ);
+    File timeRefFile = SD.open("/timeref.csv", FILE_READ);
     if (!timeRefFile) {
-        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for reading");
+        Serial.println("❌ [TIMEREF] Failed to open timeref.csv for reading");
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return false;
     }
@@ -572,7 +572,7 @@ bool loadTimeRefFromSD() {
         Serial.println(globalTimeRefBaseMillis);
         return true;
     } else {
-        Serial.println("❌ [TIMEREF] Invalid timeref.txt content");
+        Serial.println("❌ [TIMEREF] Invalid timeref.csv content");
         return false;
     }
 }
@@ -586,9 +586,9 @@ bool saveTimeRefToSD(unsigned long timestamp) {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    File timeRefFile = SD.open("/timeref.txt", FILE_WRITE);
+    File timeRefFile = SD.open("/timeref.csv", FILE_WRITE);
     if (!timeRefFile) {
-        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for writing");
+        Serial.println("❌ [TIMEREF] Failed to open timeref.csv for writing");
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return false;
     }
@@ -643,7 +643,7 @@ unsigned long getCurrentTimestamp() {
     // Handle millis overflow (reset setelah ~49 hari)
     if (currentMillis < globalTimeRefBaseMillis) {
         // Millis overflow terdeteksi, reset base
-        Serial.println("⚠️ [TIMEREF] Millis overflow detected, recalibrating...");
+        Serial.println("⚠ [TIMEREF] Millis overflow detected, recalibrating...");
         globalTimeRefBaseMillis = currentMillis;
         // Simpan ulang timeref
         saveTimeRefToSD(globalTimeRef);
@@ -676,10 +676,10 @@ void debugTimeRef() {
     Serial.print("Current Timestamp: "); Serial.println(getCurrentTimestamp());
     Serial.print("Last Update: "); Serial.print(millis() - lastTimeRefUpdate); Serial.println(" ms ago");
     
-    // Test read timeref.txt
+    // Test read timeref.csv
     digitalWrite(SPI1_NSS_PIN, LOW);
-    if (SD.exists("/timeref.txt")) {
-        File timeRefFile = SD.open("/timeref.txt", FILE_READ);
+    if (SD.exists("/timeref.csv")) {
+        File timeRefFile = SD.open("/timeref.csv", FILE_READ);
         if (timeRefFile) {
             Serial.print("TimeRef File Content: ");
             String content = timeRefFile.readStringUntil('\n');
@@ -758,7 +758,7 @@ void readPZEMData() {
         PLTSEnergy = energyAC;
         PLTSHz = frequencyAC;
         PLTSPf = powerFactorAC;
-        Serial.print("☀️ PLTS: ");
+        Serial.print("☀ PLTS: ");
         Serial.print(PLTSPower, 0); Serial.println("W");
     } else {
         GridVoltage = voltageAC;
@@ -800,7 +800,7 @@ void addToFIFO(DataRecord data) {
         Serial.println("/");
         Serial.println(FIFO_SIZE);
     } else {
-        Serial.println("⚠️ [FIFO] Buffer penuh! Data ditolak.");
+        Serial.println("⚠ [FIFO] Buffer penuh! Data ditolak.");
     }
 }
 
@@ -887,7 +887,7 @@ void receiveESP32Data() {
     // Check timeout
     currentMillisESP = millis();
     if (espDataReceived && (currentMillisESP - lastESP32Time) >= periodESP) {
-        Serial.println("⏱️ [ESP32] Timeout: Data tidak diperbarui");
+        Serial.println("⏱ [ESP32] Timeout: Data tidak diperbarui");
         espDataReceived = false;
     }
 }
@@ -895,7 +895,7 @@ void receiveESP32Data() {
 // ===== FUNGSI MEMBUAT DATA LENGKAP UNTUK BUFFER =====
 void prepareCompleteData() {
     if (!espDataReceived) {
-        Serial.println("⚠️ [BUFFER] Menunggu data ESP32...");
+        Serial.println("⚠ [BUFFER] Menunggu data ESP32...");
         return;
     }
     
@@ -1016,7 +1016,7 @@ void writeSOCi2FromBuffer() {
                 file.flush();  // Force write ke SD card
                 file.close();
                 
-                Serial.print("✍️  [SOCi2] Data written - No: ");
+                Serial.print("✍  [SOCi2] Data written - No: ");
                 Serial.print(data.no);
                 Serial.print(" | Timestamp: ");
                 Serial.print(data.timestamp);
@@ -1074,7 +1074,7 @@ void writeBMSFromBuffer() {
                 file.print(data.bms_soc, 1); file.println();
                 file.close();
                 
-                Serial.print("✍️  [BMS] Data written - No: ");
+                Serial.print("✍  [BMS] Data written - No: ");
                 Serial.print(data.no);
                 Serial.print(" | V1: ");
                 Serial.print(data.bms_v1, 2);
@@ -1100,13 +1100,13 @@ void writeBMSFromBuffer() {
                     // RETRY WRITE SETELAH RECOVERY
                     File retryFile = SD.open("/BMS.csv", FILE_WRITE);
                     if (retryFile) {
-                        retryFile.print(data.no); retryFile.print(", ");
-                        retryFile.print(data.waktu); retryFile.print(", ");
-                        retryFile.print(data.bms_v1, 2); retryFile.print(", ");
-                        retryFile.print(data.bms_v2, 2); retryFile.print(", ");
-                        retryFile.print(data.bms_v3, 2); retryFile.print(", ");
-                        retryFile.print(data.bms_v4, 2); retryFile.print(", ");
-                        retryFile.print(data.bms_total_v, 2); retryFile.print(", ");
+                        retryFile.print(data.no); retryFile.print("; ");
+                        retryFile.print(data.waktu); retryFile.print("; ");
+                        retryFile.print(data.bms_v1, 2); retryFile.print("; ");
+                        retryFile.print(data.bms_v2, 2); retryFile.print("; ");
+                        retryFile.print(data.bms_v3, 2); retryFile.print("; ");
+                        retryFile.print(data.bms_v4, 2); retryFile.print("; ");
+                        retryFile.print(data.bms_total_v, 2); retryFile.print("; ");
                         retryFile.print(data.bms_soc, 1); retryFile.println();
                         retryFile.flush();
                         retryFile.close();
@@ -1168,22 +1168,21 @@ void writeEnergiFromBuffer() {
         if (data.pendingWrites & 4) {  // Check bit 2
             File file = SD.open("/Energi.csv", FILE_WRITE);
             if (file) {
-                file.print(data.no); file.print(", ");
-                file.print(data.waktu); file.print(", ");
-                file.print(data.timestamp); file.print(", ");
-                file.print(data.energi_p_batt, 1); file.print(", ");
-                file.print(data.energi_e_batt, 0); file.print(", ");
-                file.print(data.energi_soc, 2); file.print(", ");
-                file.print(data.energi_plts_p, 1); file.print(", ");
-                file.print(data.energi_plts_e, 0); file.print(", ");
-                file.print(data.energi_grid_p, 1); file.print(", ");
-                file.print(data.energi_grid_e, 0); file.print(", ");
-                file.print(data.energi_lux, 1); file.print(", ");
-                file.print(data.energi_temp1, 1); file.print(", ");
+                file.print(data.waktu); file.print("; ");
+                file.print(data.timestamp); file.print("; ");
+                file.print(data.energi_p_batt, 1); file.print("; ");
+                file.print(data.energi_e_batt, 0); file.print("; ");
+                file.print(data.energi_soc, 2); file.print("; ");
+                file.print(data.energi_plts_p, 1); file.print("; ");
+                file.print(data.energi_plts_e, 0); file.print("; ");
+                file.print(data.energi_grid_p, 1); file.print("; ");
+                file.print(data.energi_grid_e, 0); file.print("; ");
+                file.print(data.energi_lux, 1); file.print("; ");
+                file.print(data.energi_temp1, 1); file.print("; ");
                 file.print(data.energi_temp2, 1); file.println();
                 file.close();
                 
-                Serial.print("✍️  [Energi] Data written - No: ");
+                Serial.print("✍  [Energi] Data written - No: ");
                 Serial.print(data.no);
                 Serial.print(" | P_Batt: ");
                 Serial.print(data.energi_p_batt, 1);
@@ -1209,17 +1208,16 @@ void writeEnergiFromBuffer() {
                     // RETRY WRITE SETELAH RECOVERY
                     File retryFile = SD.open("/Energi.csv", FILE_WRITE);
                     if (retryFile) {
-                        retryFile.print(data.no); retryFile.print(", ");
-                        retryFile.print(data.waktu); retryFile.print(", ");
-                        retryFile.print(data.energi_p_batt, 1); retryFile.print(", ");
-                        retryFile.print(data.energi_e_batt, 0); retryFile.print(", ");
-                        retryFile.print(data.energi_soc, 2); retryFile.print(", ");
-                        retryFile.print(data.energi_plts_p, 1); retryFile.print(", ");
-                        retryFile.print(data.energi_plts_e, 0); retryFile.print(", ");
-                        retryFile.print(data.energi_grid_p, 1); retryFile.print(", ");
-                        retryFile.print(data.energi_grid_e, 0); retryFile.print(", ");
-                        retryFile.print(data.energi_lux, 1); retryFile.print(", ");
-                        retryFile.print(data.energi_temp1, 1); retryFile.print(", ");
+                        retryFile.print(data.waktu); retryFile.print("; ");
+                        retryFile.print(data.energi_p_batt, 1); retryFile.print("; ");
+                        retryFile.print(data.energi_e_batt, 0); retryFile.print("; ");
+                        retryFile.print(data.energi_soc, 2); retryFile.print("; ");
+                        retryFile.print(data.energi_plts_p, 1); retryFile.print("; ");
+                        retryFile.print(data.energi_plts_e, 0); retryFile.print("; ");
+                        retryFile.print(data.energi_grid_p, 1); retryFile.print("; ");
+                        retryFile.print(data.energi_grid_e, 0); retryFile.print("; ");
+                        retryFile.print(data.energi_lux, 1); retryFile.print("; ");
+                        retryFile.print(data.energi_temp1, 1); retryFile.print("; ");
                         retryFile.print(data.energi_temp2, 1); retryFile.println();
                         retryFile.flush();
                         retryFile.close();
@@ -1269,7 +1267,7 @@ void cleanupCompletedData() {
         DataRecord& data = fifoBuffer[fifoHead];
         if (data.pendingWrites == 0) {
             getFromFIFO();  // Hapus data yang sudah selesai ditulis ke 3 file
-            Serial.println("🗑️  [FIFO] Data dihapus setelah ditulis ke semua file");
+            Serial.println("🗑  [FIFO] Data dihapus setelah ditulis ke semua file");
         } else {
             break;  // Hentikan jika masih ada file yang belum ditulis
         }
@@ -1348,7 +1346,7 @@ void printWriteState() {
 void urgent() {
     if (PZEMCurrentBattery > 10.0) {
         digitalWrite(RELAY_Batt, LOW);
-        Serial.print("⚠️ OVERCURRENT: "); Serial.print(PZEMCurrentBattery); Serial.println("A > 10.0A");
+        Serial.print("⚠ OVERCURRENT: "); Serial.print(PZEMCurrentBattery); Serial.println("A > 10.0A");
     } else {
         digitalWrite(RELAY_Batt, HIGH);
     }
@@ -1363,13 +1361,13 @@ void calculateSOC() {
         count++;
         SOCo += kapasitas;
         statusbatt = 1;
-        Serial.println("⬆️  Baterai Charging");
+        Serial.println("⬆  Baterai Charging");
     } else if (INA219Current > 0.2) { // discharging
         if (previousStatus != statusbatt) count = 0;
         count++;
         SOCo -= kapasitas;
         statusbatt = 0;
-        Serial.println("⬇️  Baterai Discharging");
+        Serial.println("⬇  Baterai Discharging");
     }
     previousStatus = statusbatt;
     interval = (count * periodSOC)/60000;
@@ -1447,7 +1445,7 @@ void logtoSDcard() {
     if (currentWriteState == WRITE_IDLE && !isFIFOEmpty()) {
         currentWriteState = WRITE_SOCI2;
         writeStateTimer = millis();
-        Serial.println("⏱️ [TRIGGER] Penulisan file dimulai");
+        Serial.println("⏱ [TRIGGER] Penulisan file dimulai");
     }
     
     // Display buffer status
@@ -1537,11 +1535,11 @@ void loop() {
             timeRefAvailable = false;
             globalTimeRef = 0;
             globalTimeRefBaseMillis = 0;
-            // Hapus file timeref.txt
+            // Hapus file timeref.csv
             digitalWrite(SPI1_NSS_PIN, LOW);
-            if (SD.exists("/timeref.txt")) {
-                SD.remove("/timeref.txt");
-                Serial.println("🗑️ [TIMEREF] Removed timeref.txt file");
+            if (SD.exists("/timeref.csv")) {
+                SD.remove("/timeref.csv");
+                Serial.println("🗑 [TIMEREF] Removed timeref.csv file");
             }
             digitalWrite(SPI1_NSS_PIN, HIGH);
             Serial.println("🔄 [TIMEREF] Reset to fallback mode");
