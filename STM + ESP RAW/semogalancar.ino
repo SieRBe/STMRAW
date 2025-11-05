@@ -142,6 +142,7 @@ const unsigned long periodSDCheck = 30000;  // 30 detik
 // Status SD Card
 bool sdCardAvailable = true;
 bool sdCardWasRemoved = false;  // Flag untuk track jika SD card pernah dicabut
+bool isRecursiveCheck = false;  // Proteksi terhadap rekursi berlebihan
 
 void setup() {
   // Serial Monitor
@@ -304,6 +305,12 @@ void initializeCSVFiles() {
 
 // ===== FUNGSI PENGECEKAN DAN REINISIALISASI SD CARD =====
 bool checkAndReinitializeSD() {
+    // Proteksi terhadap rekursi berlebihan
+    if (isRecursiveCheck) {
+        Serial.println("🛡️ [SD] Recursive check prevented!");
+        return false;
+    }
+    
     // Coba akses SD card dengan membaca direktori root
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);  // Stabilisasi SPI
@@ -387,8 +394,49 @@ bool checkAndReinitializeSD() {
         if (!testFile) {
             Serial.println("⚠️ [SD] Directory OK but file access FAILED!");
             digitalWrite(SPI1_NSS_PIN, HIGH);
-            // Force reinit since directory is OK but file access fails
-            return checkAndReinitializeSD();
+            
+            // Set rekursi flag dan coba reinit sekali saja
+            if (!isRecursiveCheck) {
+                isRecursiveCheck = true;
+                Serial.println("🔄 [SD] Attempting single recovery for file access...");
+                
+                delay(500);  // Give SD card time to stabilize
+                
+                // Single attempt to reinit
+                digitalWrite(SPI1_NSS_PIN, LOW);
+                delay(100);
+                
+                if (SD.begin(SPI1_NSS_PIN)) {
+                    Serial.println("✅ [SD] Recovery reinit SUCCESS!");
+                    
+                    // Test file access again
+                    File retestFile = SD.open("/SOCi2.csv", FILE_WRITE);
+                    if (retestFile) {
+                        retestFile.close();
+                        Serial.println("✅ [SD] File access RECOVERED!");
+                        sdCardAvailable = true;
+                        digitalWrite(SPI1_NSS_PIN, HIGH);
+                        isRecursiveCheck = false;
+                        return true;
+                    } else {
+                        Serial.println("❌ [SD] File access still FAILED after recovery");
+                        sdCardAvailable = false;
+                        digitalWrite(SPI1_NSS_PIN, HIGH);
+                        isRecursiveCheck = false;
+                        return false;
+                    }
+                } else {
+                    Serial.println("❌ [SD] Recovery reinit FAILED");
+                    sdCardAvailable = false;
+                    digitalWrite(SPI1_NSS_PIN, HIGH);
+                    isRecursiveCheck = false;
+                    return false;
+                }
+            } else {
+                Serial.println("🛡️ [SD] Recursive check blocked - marking SD as unavailable");
+                sdCardAvailable = false;
+                return false;
+            }
         }
         testFile.close();
         
@@ -403,6 +451,8 @@ bool checkAndReinitializeSD() {
             Serial.println("🔄 [SD] Ready to resume writing operations");
         }
         
+        // Reset rekursi flag jika berhasil
+        isRecursiveCheck = false;
         sdCardAvailable = true;
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return true;
@@ -672,15 +722,18 @@ void prepareCompleteData() {
     // Bitmask penulisan: 1=SOCi2, 2=BMS, 4=Energi
     newData.pendingWrites = 7;  // Semua file perlu ditulis
     
+    // SELALU tambahkan ke buffer, tidak peduli status SD card
     addToFIFO(newData);
     espDataReceived = false;
     
-    Serial.print("📝 [DUMMY] SOCi2 V_pv: ");
+    Serial.print("📝 [BUFFER] Data ditambahkan! SOCi2 V_pv: ");
     Serial.print(newData.soci2_v_pv, 1);
     Serial.print("V | BMS V1: ");
     Serial.print(newData.bms_v1, 2);
     Serial.print("V | Energi Lux: ");
-    Serial.println(newData.energi_lux, 1);
+    Serial.print(newData.energi_lux, 1);
+    Serial.print(" | SD Status: ");
+    Serial.println(sdCardAvailable ? "OK" : "UNAVAILABLE");
 }
 
 // ===== FUNGSI MENULIS DATA KE SOCi2.csv DARI BUFFER =====
@@ -689,11 +742,13 @@ void writeSOCi2FromBuffer() {
         return;
     }
     
-    // Selalu cek SD card sebelum menulis
+    // Cek SD card sebelum menulis, tapi jangan blocking jika gagal
     Serial.println("🔍 [SOCi2] Checking SD card before write...");
-    if (!checkAndReinitializeSD()) {
-        Serial.println("❌ [SOCi2] SD Card tidak tersedia, skip penulisan");
-        return;
+    bool sdReady = checkAndReinitializeSD();
+    
+    if (!sdReady) {
+        Serial.println("❌ [SOCi2] SD Card tidak tersedia, skip penulisan (data tetap di buffer)");
+        return;  // Data tetap di buffer untuk dicoba lagi nanti
     }
     
     digitalWrite(SPI1_NSS_PIN, LOW);
@@ -748,98 +803,11 @@ void writeSOCi2FromBuffer() {
                 
                 data.pendingWrites &= ~1;  // Clear bit 0
             } else {
-                Serial.println("❌ [SOCi2] Failed to open file for writing");
-                // Coba cek dan reinit SD card jika file gagal dibuka
-                Serial.println("🔄 [SOCi2] Attempting SD card recovery...");
-                digitalWrite(SPI1_NSS_PIN, HIGH);  // Release SPI first
-                delay(200);  // Give time for SPI release
-                
-                if (checkAndReinitializeSD()) {
-                    Serial.println("✅ [SOCi2] SD card recovered, retrying write immediately...");
-                    
-                    // Reset SPI state for retry
-                    digitalWrite(SPI1_NSS_PIN, LOW);
-                    delay(50);  // SPI stabilization
-                    
-                    // RETRY WRITE SETELAH RECOVERY
-                    File retryFile;
-                    bool retryOpened = false;
-                    
-                    for (int retryAttempt = 1; retryAttempt <= 3; retryAttempt++) {
-                        retryFile = SD.open("/SOCi2.csv", FILE_WRITE);
-                        if (retryFile) {
-                            retryOpened = true;
-                            break;
-                        } else {
-                            Serial.print("❌ [SOCi2] Retry open attempt ");
-                            Serial.print(retryAttempt);
-                            Serial.println("/3 failed");
-                            delay(200);
-                        }
-                    }
-                    
-                    if (retryOpened) {
-                        retryFile.print(data.no); retryFile.print(", ");
-                        retryFile.print(data.waktu); retryFile.print(", ");
-                        retryFile.print(interval); retryFile.print(", ");
-                        retryFile.print(data.soci2_v_pv, 2); retryFile.print(", ");
-                        retryFile.print(data.soci2_i_pv, 3); retryFile.print(", ");
-                        retryFile.print(data.soci2_p_pv, 1); retryFile.print(", ");
-                        retryFile.print(data.soci2_e_pv, 0); retryFile.print(", ");
-                        retryFile.print(data.soci2_v_batt, 2); retryFile.print(", ");
-                        retryFile.print(data.soci2_i_batt, 3); retryFile.print(", ");
-                        retryFile.print(data.soci2_p_batt, 1); retryFile.print(", ");
-                        retryFile.print(data.soci2_e_batt, 0); retryFile.print(", ");
-                        retryFile.print(data.soci2_soc, 2); retryFile.println();
-                        retryFile.flush();
-                        retryFile.close();
-                        
-                        Serial.println("🎯 [SOCi2] RETRY SUCCESS - Data written after recovery!");
-                        data.pendingWrites &= ~1;  // Clear bit 0
-                    } else {
-                        Serial.println("❌ [SOCi2] RETRY FAILED - File still not accessible");
-                        // Try one more time with extended delay
-                        delay(500);
-                        File finalRetry;
-                        bool finalOpened = false;
-                        
-                        for (int finalAttempt = 1; finalAttempt <= 3; finalAttempt++) {
-                            finalRetry = SD.open("/SOCi2.csv", FILE_WRITE);
-                            if (finalRetry) {
-                                finalOpened = true;
-                                break;
-                            } else {
-                                Serial.print("❌ [SOCi2] Final attempt ");
-                                Serial.print(finalAttempt);
-                                Serial.println("/3 failed");
-                                delay(300);
-                            }
-                        }
-                        
-                        if (finalOpened) {
-                            finalRetry.print(data.no); finalRetry.print(", ");
-                            finalRetry.print(data.waktu); finalRetry.print(", ");
-                            finalRetry.print(interval); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_v_pv, 2); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_i_pv, 3); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_p_pv, 1); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_e_pv, 0); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_v_batt, 2); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_i_batt, 3); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_p_batt, 1); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_e_batt, 0); finalRetry.print(", ");
-                            finalRetry.print(data.soci2_soc, 2); finalRetry.println();
-                            finalRetry.flush();
-                            finalRetry.close();
-                            Serial.println("🎯 [SOCi2] FINAL RETRY SUCCESS!");
-                            data.pendingWrites &= ~1;
-                        } else {
-                            Serial.println("❌ [SOCi2] ALL RETRIES FAILED - Will try next cycle");
-                        }
-                    }
-                } else {
-                    Serial.println("❌ [SOCi2] SD card recovery failed");
-                }
+                Serial.println("❌ [SOCi2] Failed to open file - marking SD as unavailable");
+                // Mark SD sebagai tidak tersedia tanpa recovery berulang
+                sdCardAvailable = false;
+                digitalWrite(SPI1_NSS_PIN, HIGH);
+                return;  // Exit dan biarkan data di buffer untuk dicoba lagi nanti
             }
             break;  // Tulis satu data sekaligus
         }
@@ -1289,6 +1257,7 @@ void loop() {
                 initializeCSVFiles();
                 sdCardAvailable = true;
                 sdCardWasRemoved = false;
+                isRecursiveCheck = false;  // Reset rekursi flag
             } else {
                 Serial.println("❌ SD Reinit FAILED");
                 sdCardAvailable = false;
@@ -1307,6 +1276,21 @@ void loop() {
             Serial.print("📍 [STATE] Current: ");
             const char* stateNames[] = {"IDLE", "SOCI2", "BMS", "ENERGI", "CLEANUP"};
             Serial.println(stateNames[currentWriteState]);
+        } else if (command == "clearflag" || command == "clearflags") {
+            Serial.println("🧹 Clearing all flags...");
+            isRecursiveCheck = false;
+            sdCardWasRemoved = false;
+            sdCardAvailable = true;
+            Serial.println("✅ All flags cleared - system reset");
+        } else if (command == "status") {
+            Serial.println("📊 === SYSTEM STATUS ===");
+            Serial.print("SD Available: "); Serial.println(sdCardAvailable ? "YES" : "NO");
+            Serial.print("SD Was Removed: "); Serial.println(sdCardWasRemoved ? "YES" : "NO");
+            Serial.print("Recursive Check: "); Serial.println(isRecursiveCheck ? "ACTIVE" : "INACTIVE");
+            Serial.print("FIFO Count: "); Serial.print(getFIFOCount()); Serial.print("/"); Serial.println(FIFO_SIZE);
+            Serial.print("ESP32 Data: "); Serial.println(espDataReceived ? "READY" : "WAITING");
+            const char* stateNames[] = {"IDLE", "SOCI2", "BMS", "ENERGI", "CLEANUP"};
+            Serial.print("Write State: "); Serial.println(stateNames[currentWriteState]);
         }
     }
 
