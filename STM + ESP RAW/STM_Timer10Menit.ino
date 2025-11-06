@@ -165,24 +165,10 @@ bool debugPZEM = false;                    // PZEM data logging on/off
 bool debugSD = true;                       // SD operations logging
 bool debugTimers = false;                  // Timer operations logging
 
-// ===== LOGGING HELPER FUNCTIONS =====
-void logError(String message) {
-    if (currentDebugLevel >= DEBUG_LEVEL_ERROR) {
-        Serial.println("❌ [ERROR] " + message);
-    }
-}
-
-void logInfo(String message) {
-    if (currentDebugLevel >= DEBUG_LEVEL_INFO) {
-        Serial.println("ℹ️ [INFO] " + message);
-    }
-}
-
-void logVerbose(String message) {
-    if (currentDebugLevel >= DEBUG_LEVEL_VERBOSE) {
-        Serial.println("🔍 [DEBUG] " + message);
-    }
-}
+// ===== LOGGING HELPER FUNCTIONS DECLARATIONS =====
+void logError(String message);
+void logInfo(String message);
+void logVerbose(String message);
 
 void setup() {
   // Serial Monitor
@@ -304,6 +290,25 @@ void setup() {
   Serial.println("🔒 Timer Overflow Protection: ENABLED");
   Serial.println("⚡ Staggered Timer Start: ENABLED");
   Serial.println("========================================\n");
+}
+
+// ===== LOGGING HELPER FUNCTIONS =====
+void logError(String message) {
+    if (currentDebugLevel >= DEBUG_LEVEL_ERROR) {
+        Serial.println("❌ [ERROR] " + message);
+    }
+}
+
+void logInfo(String message) {
+    if (currentDebugLevel >= DEBUG_LEVEL_INFO) {
+        Serial.println("ℹ️ [INFO] " + message);
+    }
+}
+
+void logVerbose(String message) {
+    if (currentDebugLevel >= DEBUG_LEVEL_VERBOSE) {
+        Serial.println("🔍 [DEBUG] " + message);
+    }
 }
 
 void preTransmission() {
