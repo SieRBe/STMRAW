@@ -162,8 +162,12 @@ bool isRecursiveCheck = false;  // Proteksi terhadap rekursi berlebihan
 int currentDebugLevel = DEBUG_LEVEL_INFO;  // Default: INFO level
 bool debugESP32 = false;                   // ESP32 data logging on/off
 bool debugPZEM = false;                    // PZEM data logging on/off
-bool debugSD = true;                       // SD operations logging
+bool debugSD = false;                      // SD operations logging (OFF by default)
 bool debugTimers = false;                  // Timer operations logging
+
+// ===== STATUS SUMMARY CONTROL =====
+unsigned long lastStatusSummary = 0;
+const unsigned long statusSummaryInterval = 300000;  // 5 menit
 
 // ===== LOGGING HELPER FUNCTIONS DECLARATIONS =====
 void logError(String message);
@@ -262,6 +266,7 @@ void setup() {
   startMillisINA = baseTime + 90000;    // Offset 1.5 menit
   startMillisATS = baseTime + 120000;   // Offset 2 menit
   startMillisSDCheck = baseTime + 15000; // Offset 15 detik
+  lastStatusSummary = baseTime;         // Initialize status summary timer
   
   Serial.println("✓ Timers initialized with staggered start");
   Serial.println("  - PZEM: 0s offset");
@@ -829,8 +834,10 @@ void readPZEMData() {
         GridEnergy = energyAC;
         GridHz = frequencyAC;
         GridPf = powerFactorAC;
-        Serial.print("🌐 Grid: ");
-        Serial.print(GridPower, 0); Serial.println("W");
+        if (debugPZEM) {
+            Serial.print("🌐 Grid: ");
+            Serial.print(GridPower, 0); Serial.println("W");
+        }
     }
     delay(200);  // Kurangi dari 500ms menjadi 200ms
 }
@@ -846,9 +853,11 @@ void readINA219Data() {
     INA219Voltage = ina219.getBusVoltage_V();
     INA219Current = ina219.getCurrent_mA() / 1000.0;
     
-    Serial.print("🔌 INA219: ");
-    Serial.print(INA219Voltage, 2); Serial.print("V ");
-    Serial.print(INA219Current, 2); Serial.println("A");
+    if (debugPZEM) {
+        Serial.print("🔌 INA219: ");
+        Serial.print(INA219Voltage, 2); Serial.print("V ");
+        Serial.print(INA219Current, 2); Serial.println("A");
+    }
 }
 
 // ===== FUNGSI FIFO BUFFER =====
@@ -938,11 +947,12 @@ void receiveESP32Data() {
                 
                 if (debugESP32) {
                     Serial.print("📡 [ESP32] (Old format) Lux: ");
-                Serial.print(espLux, 1);
-                Serial.print(" | Temp1: ");
-                Serial.print(espTemp1, 1);
-                Serial.print(" | Temp2: ");
-                Serial.println(espTemp2, 1);
+                    Serial.print(espLux, 1);
+                    Serial.print(" | Temp1: ");
+                    Serial.print(espTemp1, 1);
+                    Serial.print(" | Temp2: ");
+                    Serial.println(espTemp2, 1);
+                }
             }
         }
     }
@@ -1686,12 +1696,16 @@ void loop() {
     // Pengecekan SD Card berkala setiap 30 detik
     if (currentMillisSDCheck - startMillisSDCheck >= periodSDCheck) {
         startMillisSDCheck += periodSDCheck;
-        Serial.println("🔍 [SD] Periodic check...");
+        if (debugSD) {
+            Serial.println("🔍 [SD] Periodic check...");
+        }
         bool sdResult = checkAndReinitializeSD();
-        if (sdResult) {
-            Serial.println("✅ [SD] Periodic check: OK");
-        } else {
-            Serial.println("❌ [SD] Periodic check: FAILED");
+        if (debugSD) {
+            if (sdResult) {
+                Serial.println("✅ [SD] Periodic check: OK");
+            } else {
+                Serial.println("❌ [SD] Periodic check: FAILED");
+            }
         }
     }
 
@@ -1719,6 +1733,19 @@ void loop() {
 
     // Handle penulisan file secara state machine (jangan blocking)
     handleWriteStateMachine();
+
+    // Status summary setiap 5 menit
+    if (currentTime - lastStatusSummary >= statusSummaryInterval) {
+        lastStatusSummary = currentTime;
+        Serial.println("\n📊 === SYSTEM STATUS SUMMARY ===");
+        Serial.println("🚀 STM32 Production Mode Running");
+        Serial.print("⏱️  Uptime: "); Serial.print((currentTime / 1000 / 60)); Serial.println(" minutes");
+        Serial.print("💾 SD Card: "); Serial.println(sdCardAvailable ? "OK" : "FAILED");
+        Serial.print("📡 ESP32: "); Serial.println(espDataReceived ? "CONNECTED" : "WAITING");
+        Serial.print("📦 FIFO Buffer: "); Serial.print(getFIFOCount()); Serial.print("/"); Serial.println(FIFO_SIZE);
+        Serial.print("🕐 TimeRef: "); Serial.println(timeRefAvailable ? "AVAILABLE" : "NOT AVAILABLE");
+        Serial.println("============================\n");
+    }
 
     // Logging SOC dan trigger penulisan file setiap 10 menit (production mode)
     if ((currentMillisSOC - startMillisSOC) >= periodSOC) {
