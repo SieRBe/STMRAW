@@ -153,6 +153,37 @@ bool sdCardAvailable = true;
 bool sdCardWasRemoved = false;  // Flag untuk track jika SD card pernah dicabut
 bool isRecursiveCheck = false;  // Proteksi terhadap rekursi berlebihan
 
+// ===== DEBUG LEVEL CONTROL =====
+#define DEBUG_LEVEL_NONE 0
+#define DEBUG_LEVEL_ERROR 1
+#define DEBUG_LEVEL_INFO 2
+#define DEBUG_LEVEL_VERBOSE 3
+
+int currentDebugLevel = DEBUG_LEVEL_INFO;  // Default: INFO level
+bool debugESP32 = false;                   // ESP32 data logging on/off
+bool debugPZEM = false;                    // PZEM data logging on/off
+bool debugSD = true;                       // SD operations logging
+bool debugTimers = false;                  // Timer operations logging
+
+// ===== LOGGING HELPER FUNCTIONS =====
+void logError(String message) {
+    if (currentDebugLevel >= DEBUG_LEVEL_ERROR) {
+        Serial.println("❌ [ERROR] " + message);
+    }
+}
+
+void logInfo(String message) {
+    if (currentDebugLevel >= DEBUG_LEVEL_INFO) {
+        Serial.println("ℹ️ [INFO] " + message);
+    }
+}
+
+void logVerbose(String message) {
+    if (currentDebugLevel >= DEBUG_LEVEL_VERBOSE) {
+        Serial.println("🔍 [DEBUG] " + message);
+    }
+}
+
 void setup() {
   // Serial Monitor
   Serial.begin(9600);
@@ -755,18 +786,22 @@ void readPZEMAC(ModbusMaster &node, float &voltageAC, float &currentAC, float &p
 
 void readPZEMData() {
     readPZEMDC(nodePanel, PZEMVoltagePanel, PZEMCurrentPanel, PZEMPowerPanel, PZEMEnergyPanel);
-    Serial.print("⚡ PZEM Panel: ");
-    Serial.print(PZEMVoltagePanel, 1); Serial.print("V ");
-    Serial.print(PZEMCurrentPanel, 1); Serial.print("A ");
-    Serial.print(PZEMPowerPanel, 0); Serial.println("W");
+    if (debugPZEM) {
+        Serial.print("⚡ PZEM Panel: ");
+        Serial.print(PZEMVoltagePanel, 1); Serial.print("V ");
+        Serial.print(PZEMCurrentPanel, 1); Serial.print("A ");
+        Serial.print(PZEMPowerPanel, 0); Serial.println("W");
+    }
     
     delay(200);  // Kurangi dari 500ms menjadi 200ms
 
     readPZEMDC(nodeBattery, PZEMVoltageBattery, PZEMCurrentBattery, PZEMPowerBattery, PZEMEnergyBattery);
-    Serial.print("🔋 PZEM Batt: ");
-    Serial.print(PZEMVoltageBattery, 1); Serial.print("V ");
-    Serial.print(PZEMCurrentBattery, 1); Serial.print("A ");
-    Serial.print(PZEMPowerBattery, 0); Serial.println("W");
+    if (debugPZEM) {
+        Serial.print("🔋 PZEM Batt: ");
+        Serial.print(PZEMVoltageBattery, 1); Serial.print("V ");
+        Serial.print(PZEMCurrentBattery, 1); Serial.print("A ");
+        Serial.print(PZEMPowerBattery, 0); Serial.println("W");
+    }
     
     delay(200);  // Kurangi dari 500ms menjadi 200ms
 
@@ -778,8 +813,10 @@ void readPZEMData() {
         PLTSEnergy = energyAC;
         PLTSHz = frequencyAC;
         PLTSPf = powerFactorAC;
-        Serial.print("☀️ PLTS: ");
-        Serial.print(PLTSPower, 0); Serial.println("W");
+        if (debugPZEM) {
+            Serial.print("☀️ PLTS: ");
+            Serial.print(PLTSPower, 0); Serial.println("W");
+        }
     } else {
         GridVoltage = voltageAC;
         GridCurrent = currentAC;
@@ -815,12 +852,9 @@ void addToFIFO(DataRecord data) {
         fifoBuffer[fifoTail] = data;
         fifoTail = (fifoTail + 1) % FIFO_SIZE;
         fifoCount++;
-        Serial.print("📦 [FIFO] Data ditambahkan. Total: ");
-        Serial.print(fifoCount);
-        Serial.println("/");
-        Serial.println(FIFO_SIZE);
+        logVerbose("FIFO Data ditambahkan. Total: " + String(fifoCount) + "/" + String(FIFO_SIZE));
     } else {
-        Serial.println("⚠️ [FIFO] Buffer penuh! Data ditolak.");
+        logError("FIFO Buffer penuh! Data ditolak.");
     }
 }
 
@@ -872,14 +906,17 @@ void receiveESP32Data() {
                 }
             }
             
-            Serial.print("📡 [ESP32] Timestamp: ");
-            Serial.print(espTimestamp);
-            Serial.print(" | Lux: ");
-            Serial.print(espLux, 1);
-            Serial.print(" | Temp1: ");
-            Serial.print(espTemp1, 1);
-            Serial.print(" | Temp2: ");
-            Serial.println(espTemp2, 1);
+            // LOG ESP32 DATA HANYA JIKA DEBUG ENABLED
+            if (debugESP32) {
+                Serial.print("📡 [ESP32] Timestamp: ");
+                Serial.print(espTimestamp);
+                Serial.print(" | Lux: ");
+                Serial.print(espLux, 1);
+                Serial.print(" | Temp1: ");
+                Serial.print(espTemp1, 1);
+                Serial.print(" | Temp2: ");
+                Serial.println(espTemp2, 1);
+            }
         } else {
             // Fallback untuk format lama: lux,temp1,temp2
             int oldComma1 = receivedData.indexOf(',');
@@ -894,7 +931,8 @@ void receiveESP32Data() {
                 espDataReceived = true;
                 lastESP32Time = millis();
                 
-                Serial.print("📡 [ESP32] (Old format) Lux: ");
+                if (debugESP32) {
+                    Serial.print("📡 [ESP32] (Old format) Lux: ");
                 Serial.print(espLux, 1);
                 Serial.print(" | Temp1: ");
                 Serial.print(espTemp1, 1);
@@ -1560,6 +1598,57 @@ void loop() {
             Serial.print("Current Timestamp: "); Serial.println(getCurrentTimestamp());
         } else if (command == "timeref" || command == "timeinfo") {
             debugTimeRef();
+        } else if (command == "debug") {
+            Serial.println("🔧 === DEBUG CONTROL ===");
+            Serial.println("Commands:");
+            Serial.println("  debug quiet     - Silent mode (ERROR only)");
+            Serial.println("  debug normal    - Normal mode (INFO level)");
+            Serial.println("  debug verbose   - Verbose mode (DEBUG level)");
+            Serial.println("  debug esp on/off - ESP32 data logging");
+            Serial.println("  debug pzem on/off - PZEM data logging");
+            Serial.println("  debug sd on/off  - SD operations logging");
+            Serial.println("  debug status     - Show current debug settings");
+        } else if (command == "debug quiet") {
+            currentDebugLevel = DEBUG_LEVEL_ERROR;
+            debugESP32 = false;
+            debugPZEM = false;
+            Serial.println("🔇 Debug mode: QUIET (errors only)");
+        } else if (command == "debug normal") {
+            currentDebugLevel = DEBUG_LEVEL_INFO;
+            debugESP32 = false;
+            debugPZEM = false;
+            Serial.println("ℹ️ Debug mode: NORMAL (info level)");
+        } else if (command == "debug verbose") {
+            currentDebugLevel = DEBUG_LEVEL_VERBOSE;
+            debugESP32 = true;
+            debugPZEM = true;
+            Serial.println("🔍 Debug mode: VERBOSE (all logs)");
+        } else if (command == "debug esp on") {
+            debugESP32 = true;
+            Serial.println("📡 ESP32 debug logging: ON");
+        } else if (command == "debug esp off") {
+            debugESP32 = false;
+            Serial.println("📡 ESP32 debug logging: OFF");
+        } else if (command == "debug pzem on") {
+            debugPZEM = true;
+            Serial.println("⚡ PZEM debug logging: ON");
+        } else if (command == "debug pzem off") {
+            debugPZEM = false;
+            Serial.println("⚡ PZEM debug logging: OFF");
+        } else if (command == "debug sd on") {
+            debugSD = true;
+            Serial.println("💾 SD debug logging: ON");
+        } else if (command == "debug sd off") {
+            debugSD = false;
+            Serial.println("💾 SD debug logging: OFF");
+        } else if (command == "debug status") {
+            Serial.println("🔧 === DEBUG STATUS ===");
+            String levels[] = {"NONE", "ERROR", "INFO", "VERBOSE"};
+            Serial.println("Level: " + levels[currentDebugLevel]);
+            Serial.println("ESP32: " + String(debugESP32 ? "ON" : "OFF"));
+            Serial.println("PZEM: " + String(debugPZEM ? "ON" : "OFF"));
+            Serial.println("SD: " + String(debugSD ? "ON" : "OFF"));
+            Serial.println("Timers: " + String(debugTimers ? "ON" : "OFF"));
         } else if (command.startsWith("settime ")) {
             // Command: settime 1730794225
             String timestampStr = command.substring(8);
@@ -1604,18 +1693,21 @@ void loop() {
     // Baca PZEM setiap 10 menit (production mode)
     if (currentMillisPZEM - startMillisPZEM >= periodPZEM) {
         startMillisPZEM += periodPZEM;
+        logInfo("PZEM Data Collection Cycle Started");
         readPZEMData();
     }
 
     // Baca INA219 setiap 10 menit (production mode)
     if (currentMillisINA - startMillisINA >= periodINA) {
         startMillisINA += periodINA;
+        logInfo("INA219 Data Collection Cycle Started");
         readINA219Data();
     }
 
     // Cek ATS setiap 10 menit (production mode)
     if (currentMillisATS - startMillisATS >= periodATS) {
         startMillisATS += periodATS;
+        logInfo("ATS Monitoring Cycle Started");
         urgent();
         ATS();
     }
@@ -1626,9 +1718,12 @@ void loop() {
     // Logging SOC dan trigger penulisan file setiap 10 menit (production mode)
     if ((currentMillisSOC - startMillisSOC) >= periodSOC) {
         startMillisSOC += periodSOC;
+        logInfo("SOC Calculation & Data Logging Cycle Started");
         calculateSOC();
         logtoSDcard();
-        printWriteState();  // Debug: tampilkan state
+        if (debugTimers) {
+            printWriteState();  // Debug: tampilkan state
+        }
     }
 
     delay(10);  // Small delay to prevent watchdog trigger
