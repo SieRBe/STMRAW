@@ -59,7 +59,7 @@ bool espDataReceived = false;
 unsigned long lastESP32Time = 0;
 
 // ===== VARIABEL GLOBAL TIMEREF =====
-unsigned long globalTimeRef = 0;        // Timestamp referensi global
+unsigned long globalTimeRef = 0;        // Timestamp .referensi global
 unsigned long globalTimeRefBaseMillis = 0; // Basis millis() saat timeref di-set
 bool timeRefAvailable = false;           // Flag ketersediaan timeref
 unsigned long lastTimeRefUpdate = 0;     // Terakhir kali timeref diupdate
@@ -546,12 +546,12 @@ void initializeTimeRef() {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    // Cek apakah file timeref.txt sudah ada
-    if (SD.exists("/timeref.txt")) {
-        Serial.println("📅 [TIMEREF] Found existing timeref.txt, loading...");
+    // Cek apakah file timeref.csv sudah ada
+    if (SD.exists("/timeref.csv")) {
+        Serial.println("📅 [TIMEREF] Found existing timeref.csv, loading...");
         loadTimeRefFromSD();
     } else {
-        Serial.println("📅 [TIMEREF] No timeref.txt found, will create on first timestamp");
+        Serial.println("📅 [TIMEREF] No timeref.csv found, will create on first timestamp");
         timeRefAvailable = false;
         globalTimeRef = 0;
         globalTimeRefBaseMillis = 0;
@@ -564,20 +564,43 @@ bool loadTimeRefFromSD() {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    File timeRefFile = SD.open("/timeref.txt", FILE_READ);
+    File timeRefFile = SD.open("/timeref.csv", FILE_READ);
     if (!timeRefFile) {
-        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for reading");
+        Serial.println("❌ [TIMEREF] Failed to open timeref.csv for reading");
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return false;
     }
     
-    String line = timeRefFile.readStringUntil('\n');
-    line.trim();
+    // Read first line to check if it's header
+    String firstLine = timeRefFile.readStringUntil('\n');
+    firstLine.trim();
+    
+    unsigned long timestamp = 0;
+    
+    // Check if first line is header (contains "timestamp") or actual data
+    if (firstLine.indexOf("timestamp") >= 0) {
+        // Skip header, read next line for actual data
+        if (timeRefFile.available()) {
+            String dataLine = timeRefFile.readStringUntil('\n');
+            dataLine.trim();
+            
+            // Parse CSV: timestamp,millis_base,created_at
+            int commaIndex = dataLine.indexOf(',');
+            if (commaIndex > 0) {
+                String timestampStr = dataLine.substring(0, commaIndex);
+                timestamp = timestampStr.toInt();
+            }
+        }
+    } else {
+        // Old format (plain timestamp) or direct timestamp value
+        timestamp = firstLine.toInt();
+    }
+    
     timeRefFile.close();
     digitalWrite(SPI1_NSS_PIN, HIGH);
     
-    if (line.length() > 0) {
-        globalTimeRef = line.toInt();
+    if (timestamp > 0) {
+        globalTimeRef = timestamp;
         globalTimeRefBaseMillis = millis();
         timeRefAvailable = true;
         
@@ -587,7 +610,7 @@ bool loadTimeRefFromSD() {
         Serial.println(globalTimeRefBaseMillis);
         return true;
     } else {
-        Serial.println("❌ [TIMEREF] Invalid timeref.txt content");
+        Serial.println("❌ [TIMEREF] Invalid timeref.csv content");
         return false;
     }
 }
@@ -601,16 +624,31 @@ bool saveTimeRefToSD(unsigned long timestamp) {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    File timeRefFile = SD.open("/timeref.txt", FILE_WRITE);
+    File timeRefFile = SD.open("/timeref.csv", FILE_WRITE);
     if (!timeRefFile) {
-        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for writing");
+        Serial.println("❌ [TIMEREF] Failed to open timeref.csv for writing");
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return false;
     }
     
-    // Truncate file dan tulis timestamp baru
+    // Truncate file dan tulis header CSV jika file kosong, lalu timestamp
     timeRefFile.seek(0);
-    timeRefFile.println(timestamp);
+    
+    // Check if file is empty or new
+    bool needHeader = (timeRefFile.size() == 0);
+    
+    if (needHeader) {
+        // Write CSV header
+        timeRefFile.println("timestamp,millis_base,created_at");
+    }
+    
+    // Write timestamp data in CSV format
+    timeRefFile.print(timestamp);
+    timeRefFile.print(",");
+    timeRefFile.print(millis());
+    timeRefFile.print(",");
+    timeRefFile.println("AUTO_SAVE");
+    
     timeRefFile.flush();
     timeRefFile.close();
     digitalWrite(SPI1_NSS_PIN, HIGH);
@@ -773,18 +811,30 @@ void debugTimeRef() {
         Serial.print(nextIncrement); Serial.println(" ms");
     }
     
-    // Test read timeref.txt
+    // Test read timeref.csv
     digitalWrite(SPI1_NSS_PIN, LOW);
-    if (SD.exists("/timeref.txt")) {
-        File timeRefFile = SD.open("/timeref.txt", FILE_READ);
+    if (SD.exists("/timeref.csv")) {
+        File timeRefFile = SD.open("/timeref.csv", FILE_READ);
         if (timeRefFile) {
-            Serial.print("TimeRef File Content: ");
-            String content = timeRefFile.readStringUntil('\n');
-            Serial.println(content);
+            Serial.println("TimeRef CSV Content:");
+            
+            // Read all lines
+            int lineNum = 1;
+            while (timeRefFile.available()) {
+                String line = timeRefFile.readStringUntil('\n');
+                line.trim();
+                if (line.length() > 0) {
+                    Serial.print("  Line ");
+                    Serial.print(lineNum);
+                    Serial.print(": ");
+                    Serial.println(line);
+                    lineNum++;
+                }
+            }
             timeRefFile.close();
         }
     } else {
-        Serial.println("TimeRef File: NOT EXISTS");
+        Serial.println("TimeRef CSV File: NOT EXISTS");
     }
     digitalWrite(SPI1_NSS_PIN, HIGH);
     
