@@ -90,22 +90,6 @@ EnergyBaseline energyBaseline;
 float dailyEnergyPanel = 0.0, dailyEnergyBattery = 0.0, dailyEnergyAC = 0.0;
 float dailyEnergyGrid = 0.0, dailyEnergyPLTS = 0.0;
 
-// Power detection variables untuk energy reset
-bool energyResetOnPowerDetection = true;  // Enable/disable fitur ini
-float powerThresholdPanel = 10.0;         // Threshold power panel (10W)
-float powerThresholdBattery = 5.0;        // Threshold power battery (5W) 
-bool dailyPowerDetected = false;          // Flag power hari ini sudah terdeteksi
-bool panelPowerDetected = false;          // Flag power panel terdeteksi hari ini
-bool batteryPowerDetected = false;        // Flag power battery terdeteksi hari ini
-unsigned long lastPowerResetTime = 0;    // Waktu terakhir reset berdasarkan power
-
-// Status power kemarin (untuk deteksi transisi)
-bool yesterdayPanelHadPower = false;
-bool yesterdayBatteryHadPower = false;
-
-// Waktu deteksi power pertama hari ini
-unsigned long firstPowerDetectionToday = 0;
-
 // ===== STRUKTUR DATA UNTUK FIFO BUFFER (UPDATE) =====
 struct DataRecord {
     int no;
@@ -400,191 +384,6 @@ void debugEnergyCounters() {
     Serial.println("=================================");
 }
 
-// ===== FUNGSI ENERGY RESET BERDASARKAN POWER DETECTION =====
-
-void checkPowerBasedEnergyReset() {
-    if (!energyResetOnPowerDetection) return;
-    
-    // Deteksi power pada panel dan battery
-    bool currentPanelHasPower = (PZEMPowerPanel >= powerThresholdPanel);
-    bool currentBatteryHasPower = (abs(PZEMPowerBattery) >= powerThresholdBattery);
-    
-    // Cek apakah ini adalah deteksi power pertama hari ini
-    bool firstPowerOfDay = false;
-    
-    // Panel: deteksi power pertama (biasanya sunrise)
-    if (currentPanelHasPower && !panelPowerDetected) {
-        panelPowerDetected = true;
-        firstPowerOfDay = true;
-        Serial.print("🌅 [ENERGY] First panel power detected today: ");
-        Serial.print(PZEMPowerPanel, 1); Serial.println("W");
-    }
-    
-    // Battery: deteksi power pertama (charging atau discharging)
-    if (currentBatteryHasPower && !batteryPowerDetected) {
-        batteryPowerDetected = true;
-        if (!firstPowerOfDay) {  // Jika panel belum detect, gunakan battery sebagai trigger
-            firstPowerOfDay = true;
-            Serial.print("🔋 [ENERGY] First battery power detected today: ");
-            Serial.print(PZEMPowerBattery, 1); Serial.println("W");
-        }
-    }
-    
-    // Trigger reset jika deteksi power pertama hari ini
-    if (firstPowerOfDay && !dailyPowerDetected) {
-        Serial.println("⚡ [ENERGY] FIRST POWER DETECTION - Triggering energy reset!");
-        
-        // Lakukan reset energy baseline
-        resetEnergyOnPowerDetection();
-        
-        dailyPowerDetected = true;
-        firstPowerDetectionToday = millis();
-        lastPowerResetTime = millis();
-        
-        // Log event ke SD card
-        logPowerResetEvent();
-    }
-    
-    // Reset flag di akhir hari (berdasarkan waktu atau tidak ada power lama)
-    checkEndOfDayReset();
-}
-
-void resetEnergyOnPowerDetection() {
-    Serial.println("🔄 [ENERGY] Power-based energy reset starting...");
-    
-    // Simpan nilai saat ini sebagai baseline baru
-    energyBaseline.panelEnergy = PZEMEnergyPanel;
-    energyBaseline.batteryEnergy = PZEMEnergyBattery;
-    energyBaseline.acEnergy = (isPLTS ? PLTSEnergy : GridEnergy);
-    energyBaseline.gridEnergy = GridEnergy;
-    energyBaseline.pltsEnergy = PLTSEnergy;
-    energyBaseline.resetTime = getCurrentTimestamp();
-    
-    // Reset daily energy counters
-    dailyEnergyPanel = 0.0;
-    dailyEnergyBattery = 0.0;
-    dailyEnergyAC = 0.0;
-    dailyEnergyGrid = 0.0;
-    dailyEnergyPLTS = 0.0;
-    
-    // Update tracking variables
-    lastEnergyReset = millis();
-    
-    // Save to SD card
-    saveEnergyBaseline();
-    
-    Serial.println("✅ [ENERGY] Power-based energy reset completed!");
-    Serial.print("   📊 New Panel baseline: "); Serial.print(energyBaseline.panelEnergy, 0); Serial.println(" Wh");
-    Serial.print("   🔋 New Battery baseline: "); Serial.print(energyBaseline.batteryEnergy, 0); Serial.println(" Wh");
-    Serial.print("   🌐 New Grid baseline: "); Serial.print(energyBaseline.gridEnergy, 0); Serial.println(" Wh");
-    Serial.print("   ☀ New PLTS baseline: "); Serial.print(energyBaseline.pltsEnergy, 0); Serial.println(" Wh");
-}
-
-void checkEndOfDayReset() {
-    unsigned long currentTime = getCurrentTimestamp();
-    
-    // Method 1: Reset berdasarkan timestamp (midnight detection)
-    if (timeRefAvailable) {
-        // Convert ke local time (asumsi timezone +7 untuk Indonesia)
-        unsigned long localTime = currentTime + (7 * 3600);  // UTC+7
-        int currentDay = localTime / 86400;
-        int currentHour = (localTime % 86400) / 3600;
-        
-        // Reset flag di tengah malam (jam 00:00 - 02:00)
-        if (currentHour >= 0 && currentHour < 2 && dailyPowerDetected) {
-            if (lastResetDay != currentDay) {
-                Serial.println("🌙 [ENERGY] Midnight detected - Resetting daily flags");
-                resetDailyFlags();
-                lastResetDay = currentDay;
-            }
-        }
-    }
-    
-    // Method 2: Reset berdasarkan tidak ada power lama (fallback)
-    bool currentPanelHasPower = (PZEMPowerPanel >= powerThresholdPanel);
-    bool currentBatteryHasPower = (abs(PZEMPowerBattery) >= powerThresholdBattery);
-    
-    // Jika tidak ada power selama 6 jam, reset flag (asumsi malam hari)
-    if (!currentPanelHasPower && !currentBatteryHasPower) {
-        if (dailyPowerDetected && (millis() - firstPowerDetectionToday) > (6UL * 3600 * 1000)) {
-            Serial.println("🌃 [ENERGY] Long no-power period detected - Resetting daily flags");
-            resetDailyFlags();
-        }
-    }
-}
-
-void resetDailyFlags() {
-    dailyPowerDetected = false;
-    panelPowerDetected = false;
-    batteryPowerDetected = false;
-    firstPowerDetectionToday = 0;
-    
-    // Backup status kemarin
-    yesterdayPanelHadPower = (PZEMPowerPanel >= powerThresholdPanel);
-    yesterdayBatteryHadPower = (abs(PZEMPowerBattery) >= powerThresholdBattery);
-    
-    Serial.println("🔄 [ENERGY] Daily detection flags reset for new day");
-}
-
-void logPowerResetEvent() {
-    if (!sdCardAvailable) return;
-    
-    digitalWrite(SPI1_NSS_PIN, LOW);
-    delay(10);
-    
-    File resetLog = SD.open("/power_reset_log.txt", FILE_WRITE);
-    if (resetLog) {
-        unsigned long currentTime = getCurrentTimestamp();
-        resetLog.print("POWER_RESET: ");
-        resetLog.print(currentTime);
-        resetLog.print(" Panel_Power: ");
-        resetLog.print(PZEMPowerPanel, 1);
-        resetLog.print("W Battery_Power: ");
-        resetLog.print(PZEMPowerBattery, 1);
-        resetLog.print("W Panel_Energy: ");
-        resetLog.print(PZEMEnergyPanel, 0);
-        resetLog.print("Wh Battery_Energy: ");
-        resetLog.print(PZEMEnergyBattery, 0);
-        resetLog.println("Wh");
-        resetLog.close();
-        Serial.println("💾 [ENERGY] Power reset event logged to SD");
-    }
-    
-    digitalWrite(SPI1_NSS_PIN, HIGH);
-}
-
-void debugPowerDetection() {
-    Serial.println("📊 === POWER DETECTION DEBUG ===");
-    Serial.print("Power-based reset: "); Serial.println(energyResetOnPowerDetection ? "ENABLED" : "DISABLED");
-    Serial.print("Panel power threshold: "); Serial.print(powerThresholdPanel, 1); Serial.println("W");
-    Serial.print("Battery power threshold: "); Serial.print(powerThresholdBattery, 1); Serial.println("W");
-    
-    Serial.print("Current panel power: "); Serial.print(PZEMPowerPanel, 1); Serial.println("W");
-    Serial.print("Current battery power: "); Serial.print(PZEMPowerBattery, 1); Serial.println("W");
-    
-    Serial.print("Panel power detected today: "); Serial.println(panelPowerDetected ? "YES" : "NO");
-    Serial.print("Battery power detected today: "); Serial.println(batteryPowerDetected ? "YES" : "NO");
-    Serial.print("Daily power detected: "); Serial.println(dailyPowerDetected ? "YES" : "NO");
-    
-    if (firstPowerDetectionToday > 0) {
-        Serial.print("First power detection: "); 
-        Serial.print((millis() - firstPowerDetectionToday) / 1000); 
-        Serial.println(" seconds ago");
-    } else {
-        Serial.println("First power detection: NOT YET");
-    }
-    
-    Serial.print("Last power reset: ");
-    if (lastPowerResetTime > 0) {
-        Serial.print((millis() - lastPowerResetTime) / 1000);
-        Serial.println(" seconds ago");
-    } else {
-        Serial.println("NEVER");
-    }
-    
-    Serial.println("==================================");
-}
-
 void setup() {
   // Serial Monitor
   Serial.begin(9600);
@@ -593,10 +392,9 @@ void setup() {
   // Debug: Pastikan serial terhubung
   delay(2000);
   Serial.println("\n\n🚀 ==== STM32 MONITORING SYSTEM START ====");
-  Serial.println("📅 Version: STM 24 NOV 2024 with Power-Based Energy Reset");
-  Serial.println("⭐ Features: DUAL PZEM + BMS + INA219 + SD Logging + ESP32 Interface + AUTO TIMEREF + POWER ENERGY RESET");
-  Serial.println("🔋 Energy Reset: Automatic reset on first power detection (sunrise/activity)");
-  Serial.println("⚡ Power Detection: Smart energy baseline tracking based on solar/battery activity");
+  Serial.println("📅 Version: STM 24 NOV 2024 with 24h Energy Reset");
+  Serial.println("⭐ Features: DUAL PZEM + BMS + INA219 + SD Logging + ESP32 Interface + AUTO TIMEREF + ENERGY RESET");
+  Serial.println("🔋 Energy Reset: Daily baseline tracking for accurate energy monitoring");
   Serial.println("==================================================");
   Serial.println("STM32 System Starting...");
 
@@ -692,18 +490,12 @@ void setup() {
   // Inisialisasi Energy Baseline System
   Serial.println("\nInitializing Energy Reset System...");
   if (!loadEnergyBaseline()) {
-      Serial.println("🔄 [ENERGY] No existing baseline found, will initialize on first power detection");
+      Serial.println("🔄 [ENERGY] No existing baseline found, will initialize after first PZEM reading");
   } else {
-      // Determine current day untuk tracking
+      // Determine current day for reset tracking
       lastResetDay = getCurrentTimestamp() / 86400;
       Serial.print("✅ [ENERGY] System ready, current day: "); Serial.println(lastResetDay);
   }
-  
-  // Reset daily flags saat startup
-  resetDailyFlags();
-  Serial.println("🔄 [ENERGY] Power detection flags initialized");
-  Serial.print("⚙ [ENERGY] Panel threshold: "); Serial.print(powerThresholdPanel, 1); Serial.println("W");
-  Serial.print("⚙ [ENERGY] Battery threshold: "); Serial.print(powerThresholdBattery, 1); Serial.println("W");
   
   Serial.println("========== STARTUP COMPLETE ==========\n");
 }
@@ -1243,18 +1035,13 @@ void readPZEMData() {
     }
     delay(200);  // Kurangi dari 500ms menjadi 200ms
     
-    // TAMBAHAN: Cek power-based energy reset setelah baca PZEM
-    checkPowerBasedEnergyReset();
-    
-    // Initialize energy baseline if this is the first successful reading (fallback mode)
+    // Initialize energy baseline if this is the first successful reading
     static bool energyBaselineInitialized = false;
     if (!energyBaselineInitialized && PZEMEnergyPanel > 0 && PZEMEnergyBattery > 0) {
         if (energyBaseline.resetTime == 0) {  // No baseline loaded from SD
-            if (!energyResetOnPowerDetection) {
-                Serial.println("🔄 [ENERGY] First PZEM reading complete, initializing energy baseline (power detection disabled)...");
-                initializeEnergyBaseline();
-                energyBaselineInitialized = true;
-            }
+            Serial.println("🔄 [ENERGY] First PZEM reading complete, initializing energy baseline...");
+            initializeEnergyBaseline();
+            energyBaselineInitialized = true;
         } else {
             energyBaselineInitialized = true;
             Serial.println("✅ [ENERGY] Using loaded baseline from SD card");
@@ -2099,35 +1886,6 @@ void loop() {
             Serial.print("Reset Day: "); Serial.println(lastResetDay);
             Serial.print("Hours since reset: "); 
             Serial.println((millis() - lastEnergyReset) / 3600000.0);
-        } else if (command == "power" || command == "powerdetect") {
-            debugPowerDetection();
-        } else if (command == "resetpower") {
-            Serial.println("🔄 [ENERGY] Manual power detection reset...");
-            resetDailyFlags();
-            Serial.println("✅ [ENERGY] Power detection flags reset");
-        } else if (command == "setthreshold") {
-            Serial.println("⚙ [ENERGY] Power thresholds:");
-            Serial.print("Panel: "); Serial.print(powerThresholdPanel, 1); Serial.println("W");
-            Serial.print("Battery: "); Serial.print(powerThresholdBattery, 1); Serial.println("W");
-            Serial.println("Use 'setpanel X' or 'setbattery X' to change");
-        } else if (command.startsWith("setpanel ")) {
-            float newThreshold = command.substring(9).toFloat();
-            if (newThreshold > 0) {
-                powerThresholdPanel = newThreshold;
-                Serial.print("✅ [ENERGY] Panel threshold set to: ");
-                Serial.print(powerThresholdPanel, 1); Serial.println("W");
-            }
-        } else if (command.startsWith("setbattery ")) {
-            float newThreshold = command.substring(11).toFloat();
-            if (newThreshold > 0) {
-                powerThresholdBattery = newThreshold;
-                Serial.print("✅ [ENERGY] Battery threshold set to: ");
-                Serial.print(powerThresholdBattery, 1); Serial.println("W");
-            }
-        } else if (command == "togglepower") {
-            energyResetOnPowerDetection = !energyResetOnPowerDetection;
-            Serial.print("🔄 [ENERGY] Power-based reset: ");
-            Serial.println(energyResetOnPowerDetection ? "ENABLED" : "DISABLED");
         }
     }
 
