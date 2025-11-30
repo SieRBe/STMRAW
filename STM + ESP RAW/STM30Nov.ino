@@ -240,15 +240,6 @@ bool loadEnergyBaseline() {
         energyFile.read((uint8_t*)&energyBaseline, sizeof(EnergyBaseline));
         energyFile.close();
         digitalWrite(SPI1_NSS_PIN, HIGH);
-        
-        Serial.println("✅ [ENERGY] Loaded energy baseline from SD:");
-        Serial.print("   Panel: "); Serial.print(energyBaseline.panelEnergy); Serial.println(" Wh");
-        Serial.print("   Battery: "); Serial.print(energyBaseline.batteryEnergy); Serial.println(" Wh");
-        Serial.print("   AC: "); Serial.print(energyBaseline.acEnergy); Serial.println(" Wh");
-        Serial.print("   Grid: "); Serial.print(energyBaseline.gridEnergy); Serial.println(" Wh");
-        Serial.print("   PLTS: "); Serial.print(energyBaseline.pltsEnergy); Serial.println(" Wh");
-        Serial.print("   Reset Time: "); Serial.println(energyBaseline.resetTime);
-        
         return true;
     } else {
         Serial.println("❌ [ENERGY] Invalid energy_baseline.txt content");
@@ -302,13 +293,6 @@ void initializeEnergyBaseline() {
     
     lastEnergyReset = millis();
     energyResetToday = true;
-    
-    Serial.println("🔄 [ENERGY] Initialized energy baseline:");
-    Serial.print("   Panel: "); Serial.print(energyBaseline.panelEnergy); Serial.println(" Wh");
-    Serial.print("   Battery: "); Serial.print(energyBaseline.batteryEnergy); Serial.println(" Wh");
-    Serial.print("   AC: "); Serial.print(energyBaseline.acEnergy); Serial.println(" Wh");
-    Serial.print("   Reset Time: "); Serial.println(energyBaseline.resetTime);
-    
     saveEnergyBaseline();
 }
 
@@ -320,12 +304,6 @@ void checkDailyEnergyReset() {
     
     // Check if it's a new day
     if (lastResetDay != currentDay || (millis() - lastEnergyReset) >= energyResetInterval) {
-        Serial.println("🌅 [ENERGY] Daily reset trigger activated!");
-        Serial.print("   Last reset day: "); Serial.println(lastResetDay);
-        Serial.print("   Current day: "); Serial.println(currentDay);
-        Serial.print("   Time since last reset: "); 
-        Serial.print((millis() - lastEnergyReset) / 3600000.0); Serial.println(" hours");
-        
         // Perform daily reset
         initializeEnergyBaseline();
         lastResetDay = currentDay;
@@ -357,8 +335,6 @@ void updateDailyEnergyCounters() {
     if (currentPanelEnergy >= energyBaseline.panelEnergy) {
         dailyEnergyPanel = currentPanelEnergy - energyBaseline.panelEnergy;
     } else {
-        // PZEM counter reset detected
-        Serial.println("⚠ [ENERGY] Panel energy counter reset detected");
         energyBaseline.panelEnergy = 0;
         dailyEnergyPanel = currentPanelEnergy;
     }
@@ -366,7 +342,6 @@ void updateDailyEnergyCounters() {
     if (currentBatteryEnergy >= energyBaseline.batteryEnergy) {
         dailyEnergyBattery = currentBatteryEnergy - energyBaseline.batteryEnergy;
     } else {
-        Serial.println("⚠ [ENERGY] Battery energy counter reset detected");
         energyBaseline.batteryEnergy = 0;
         dailyEnergyBattery = currentBatteryEnergy;
     }
@@ -374,7 +349,6 @@ void updateDailyEnergyCounters() {
     if (currentGridEnergy >= energyBaseline.gridEnergy) {
         dailyEnergyGrid = currentGridEnergy - energyBaseline.gridEnergy;
     } else {
-        Serial.println("⚠ [ENERGY] Grid energy counter reset detected");
         energyBaseline.gridEnergy = 0;
         dailyEnergyGrid = currentGridEnergy;
     }
@@ -382,7 +356,6 @@ void updateDailyEnergyCounters() {
     if (currentPLTSEnergy >= energyBaseline.pltsEnergy) {
         dailyEnergyPLTS = currentPLTSEnergy - energyBaseline.pltsEnergy;
     } else {
-        Serial.println("⚠ [ENERGY] PLTS energy counter reset detected");
         energyBaseline.pltsEnergy = 0;
         dailyEnergyPLTS = currentPLTSEnergy;
     }
@@ -392,30 +365,12 @@ void updateDailyEnergyCounters() {
 }
 
 void debugEnergyCounters() {
-    Serial.println("📊 === ENERGY COUNTERS DEBUG ===");
-    Serial.print("Current readings - Panel: "); Serial.print(PZEMEnergyPanel);
-    Serial.print(" Battery: "); Serial.print(PZEMEnergyBattery);
-    Serial.print(" Grid: "); Serial.print(GridEnergy);
-    Serial.print(" PLTS: "); Serial.println(PLTSEnergy);
-    
-    Serial.print("Baseline - Panel: "); Serial.print(energyBaseline.panelEnergy);
-    Serial.print(" Battery: "); Serial.print(energyBaseline.batteryEnergy);
-    Serial.print(" Grid: "); Serial.print(energyBaseline.gridEnergy);
-    Serial.print(" PLTS: "); Serial.println(energyBaseline.pltsEnergy);
-    
-    Serial.print("Daily counters - Panel: "); Serial.print(dailyEnergyPanel);
-    Serial.print(" Battery: "); Serial.print(dailyEnergyBattery);
-    Serial.print(" Grid: "); Serial.print(dailyEnergyGrid);
-    Serial.print(" PLTS: "); Serial.println(dailyEnergyPLTS);
-    Serial.print(" AC (current): "); Serial.println(dailyEnergyAC);
-    
-    Serial.print("Reset info - Last reset: "); 
-    Serial.print((millis() - lastEnergyReset) / 3600000.0); Serial.print(" hours ago");
-    Serial.print(" | Last day: "); Serial.print(lastResetDay);
-    Serial.print(" | Current day: "); Serial.println(getCurrentTimestamp() / 86400);
-    Serial.print("Time until next reset: "); 
-    Serial.print(24.0 - ((millis() - lastEnergyReset) / 3600000.0)); Serial.println(" hours");
-    Serial.println("=================================");
+    Serial.print("E:");
+    Serial.print(dailyEnergyPanel);
+    Serial.print(",");
+    Serial.print(dailyEnergyBattery);
+    Serial.print(",");
+    Serial.println(dailyEnergyGrid);
 }
 
 void setup() {
@@ -425,34 +380,23 @@ void setup() {
   
   // Debug: Pastikan serial terhubung
   delay(2000);
-  Serial.println("\n\n🚀 ==== STM32 MONITORING SYSTEM START ====");
-  Serial.println("📅 Version: STM 30 NOV 2024 with Dual-Path Architecture");
-  Serial.println("⭐ Features: DUAL PZEM + BMS + INA219 + SD Logging + ESP32 Interface + AUTO TIMEREF + ENERGY RESET");
-  Serial.println("🔋 Energy Reset: Daily baseline tracking for accurate energy monitoring");
-  Serial.println("⚡ Dual-Path: Fast path for realtime (<1s) + Slow path for SD logging");
-  Serial.println("📊 Architecture: Realtime monitoring independent from SD card operations");
-  Serial.println("==================================================");
-  Serial.println("STM32 System Starting...");
+  Serial.println("STM32 v30NOV2024 - Dual-Path");
+  Serial.println("Starting...");
 
   // Komunikasi Antar Perangkat
-  Serial2.begin(9600, SERIAL_8N2); // Untuk komunikasi PZEM
-  Serial3.begin(9600);  // Untuk komunikasi dengan ESP32 (9600 baud)
+  Serial2.begin(9600, SERIAL_8N2);
+  Serial3.begin(9600);
   delay(500);
-  Serial.println("✓ Serial2 & Serial3 initialized");
-  Serial.println("ℹ Serial3: 9600 baud for ESP32 communication");
 
   pinMode(SPI1_NSS_PIN, OUTPUT);
   digitalWrite(SPI1_NSS_PIN, HIGH);
 
   // Inisialisasi SD Card
-  Serial.print("Initializing SD card...");
   digitalWrite(SPI1_NSS_PIN, LOW);
   if (!SD.begin(SPI1_NSS_PIN)) {
-    Serial.println("initialization failed!");
+    Serial.println("SD FAIL");
     while (1);
   }
-  Serial.println("initialization done.");
-  Serial.println("✓ SD Card initialized");
   digitalWrite(SPI1_NSS_PIN, HIGH);
   delay(500);
 
@@ -461,52 +405,34 @@ void setup() {
   pinMode(MAX485_DE, OUTPUT);
   digitalWrite(MAX485_RE, 0);
   digitalWrite(MAX485_DE, 0);
-  Serial.println("✓ MAX485 configured");
 
   // Konfigurasi Relay
   pinMode(RELAY_ATS_F, OUTPUT);
   pinMode(RELAY_Inv, OUTPUT);
   pinMode(RELAY_Batt, OUTPUT);
   pinMode(RELAY_ATS_N, OUTPUT);
-
   digitalWrite(RELAY_ATS_F, HIGH);
   digitalWrite(RELAY_Inv, HIGH);
   digitalWrite(RELAY_Batt, HIGH);
   digitalWrite(RELAY_ATS_N, HIGH);
-  Serial.println("✓ Relays configured");
 
   // Inisialisasi Modbus
   nodePanel.begin(pzemSlaveAddrPanel, Serial2);
   nodePanel.preTransmission(preTransmission);
   nodePanel.postTransmission(postTransmission);
-
   nodeBattery.begin(pzemSlaveAddrBattery, Serial2);
   nodeBattery.preTransmission(preTransmission);
   nodeBattery.postTransmission(postTransmission);
-
   nodeAC.begin(pzemSlaveAddrAC, Serial2);
   nodeAC.preTransmission(preTransmission);
   nodeAC.postTransmission(postTransmission);
-  Serial.println("✓ Modbus initialized");
 
-  // Inisialisasi I2C (Wire)
-  Serial.println("Initializing Wire (I2C)...");
+  // Inisialisasi I2C & INA219
   Wire.begin();
   delay(500);
-  Serial.println("✓ Wire (I2C) initialized");
-  
-  // Inisialisasi INA219
-  if (! ina219.begin())
-  {
-    Serial.println("Failed to find INA219 chip");
-    while (1) 
-    {
-      delay(10);
-    }
-  }
+  if (!ina219.begin()) while (1);
   ina219.setCalibration_32V_50A();
   ina219Available = true;
-  Serial.println("✓ INA219 initialized");
 
   startMillisPZEM = millis();
   startMillisSOC = millis();
@@ -515,25 +441,18 @@ void setup() {
   startMillisATS = millis();
   startMillisSDCheck = millis();
   
-  // Inisialisasi file CSV di SD Card
-  Serial.println("\nInitializing CSV files on SD Card...");
+  // Inisialisasi file CSV
   initializeCSVFiles();
   
   // Inisialisasi TimeRef
-  Serial.println("\nInitializing TimeRef system...");
   initializeTimeRef();
   
-  // Inisialisasi Energy Baseline System
-  Serial.println("\nInitializing Energy Reset System...");
-  if (!loadEnergyBaseline()) {
-      Serial.println("🔄 [ENERGY] No existing baseline found, will initialize after first PZEM reading");
-  } else {
-      // Determine current day for reset tracking
+  // Inisialisasi Energy Baseline
+  if (loadEnergyBaseline()) {
       lastResetDay = getCurrentTimestamp() / 86400;
-      Serial.print("✅ [ENERGY] System ready, current day: "); Serial.println(lastResetDay);
   }
   
-  Serial.println("========== STARTUP COMPLETE ==========\n");
+  Serial.println("Ready");
 }
 
 void preTransmission() {
@@ -557,12 +476,7 @@ void initializeCSVFiles() {
         if (file) {
             file.println("No;Timestamp;V PV (V);I PV (A);P PV (W);E PV (Wh)");
             file.close();
-            Serial.println("✓ PZEMPV.csv created with header");
-        } else {
-            Serial.println("❌ Failed to create PZEMPV.csv");
         }
-    } else {
-        Serial.println("✓ PZEMPV.csv already exists");
     }
 
     // === Inisialisasi PZEMBATT.csv ===
@@ -571,44 +485,28 @@ void initializeCSVFiles() {
         if (file) {
             file.println("No;Timestamp;V Batt (V);I Batt (A);P Batt (W);E Batt (Wh)");
             file.close();
-            Serial.println("✓ PZEMBATT.csv created with header");
-        } else {
-            Serial.println("❌ Failed to create PZEMBATT.csv");
         }
-    } else {
-        Serial.println("✓ PZEMBATT.csv already exists");
     }
     
-    // === Inisialisasi BMS.csv (UPDATE HEADER - tambah Current dan Temperature) ===
+    // === Inisialisasi BMS.csv ===
     if (!SD.exists("/BMS.csv")) {
         File file = SD.open("/BMS.csv", FILE_WRITE);
         if (file) {
             file.println("No;Timestamp;V1 (V);V2 (V);V3 (V);V4 (V);Total Voltage (V);Total Current (A);Temp1 (C);Temp2 (C);SOC (%)");
             file.close();
-            Serial.println("✓ BMS.csv created with header (with Current and Temperature)");
-        } else {
-            Serial.println("❌ Failed to create BMS.csv");
         }
-    } else {
-        Serial.println("✓ BMS.csv already exists");
     }
     
-    // === Inisialisasi LOAD&ENV.csv ===
+    // === Inisialisasi LOAD.csv ===
     if (!SD.exists("/LOAD.csv")) {
         File file = SD.open("/LOAD.csv", FILE_WRITE);
         if (file) {
             file.println("No;Timestamp;Load Power (W);Load Energy (Wh);Lux (lx);Temp1 (C);Temp2 (C)");
             file.close();
-            Serial.println("✓ load.csv created with header");
-        } else {
-            Serial.println("❌ Failed to create LOAD.csv");
         }
-    } else {
-        Serial.println("✓ load.csv already exists");
     }
     
     digitalWrite(SPI1_NSS_PIN, HIGH);
-    Serial.println("📦 All CSV files ready!\n");
 }
 
 // ===== FUNGSI PENGECEKAN DAN REINISIALISASI SD CARD =====
@@ -627,52 +525,39 @@ bool checkAndReinitializeSD() {
     if (!root) {
         // SD card tidak dapat diakses
         digitalWrite(SPI1_NSS_PIN, HIGH);
-        Serial.println("⚠ [SD] Card not accessible, attempting reinitialization...");
         
         // Set flag bahwa SD card pernah dicabut
         if (!sdCardWasRemoved) {
             sdCardWasRemoved = true;
-            Serial.println("🚨 [SD] Card removal detected!");
         }
         
         delay(500);  // Beri waktu lebih lama untuk stabilisasi
         
-        // Reset SPI dan coba reinisialisasi beberapa kali
+        // Reset SPI dan coba reinisialisasi
         for (int attempt = 1; attempt <= 3; attempt++) {
-            Serial.print("🔄 [SD] Reinit attempt ");
-            Serial.print(attempt);
-            Serial.println("/3...");
-            
             digitalWrite(SPI1_NSS_PIN, LOW);
             delay(100);
             
             if (SD.begin(SPI1_NSS_PIN)) {
-                Serial.println("✅ [SD] Successfully reinitialized!");
-                
-                // VALIDATE FILE ACCESS CAPABILITY
-                Serial.println("🧪 [SD] Testing file access after reinit...");
+                // VALIDATE FILE ACCESS
                 File testAccess = SD.open("/PZEMPV.csv", FILE_WRITE);
                 if (testAccess) {
                     testAccess.close();
-                    Serial.println("✅ [SD] File access test SUCCESS!");
                 } else {
-                    Serial.println("❌ [SD] File access test FAILED - retrying...");
                     digitalWrite(SPI1_NSS_PIN, HIGH);
                     delay(500);
-                    continue;  // Try next attempt
+                    continue;
                 }
                 
-                // Pastikan file CSV masih ada, jika tidak buat ulang
+                // Pastikan file CSV masih ada
                 if (!SD.exists("/PZEMPV.csv") || !SD.exists("/BMS.csv") || !SD.exists("/PZEMPV.csv")) {
-                    Serial.println("📋 [SD] CSV files missing, recreating...");
                     digitalWrite(SPI1_NSS_PIN, HIGH);
                     initializeCSVFiles();
                 }
                 
-                // Reset write state machine untuk memulai dari awal
+                // Reset write state machine
                 currentWriteState = WRITE_IDLE;
                 writeStateTimer = millis();
-                Serial.println("🔄 [SD] Write state machine reset to IDLE");
                 
                 // Update status flags
                 sdCardAvailable = true;
@@ -1075,8 +960,6 @@ void updateRealtimeData() {
     
     realtimeData.dataValid = true;
     lastRealtimeUpdate = millis();
-    
-    Serial.println("✅ [FAST PATH] Realtime data updated");
 }
 
 // ===== FAST PATH: SEND REALTIME DATA TO ESP32 (NON-BLOCKING) =====
@@ -1123,28 +1006,14 @@ void sendRealtimeToESP32() {
                   String(realtimeData.temp2, 1) + "\n";
     
     Serial3.print(data);
-    
-    Serial.println("📤 [FAST PATH] Realtime data sent to ESP32");
-    Serial.print("   Size: "); Serial.print(data.length()); Serial.println(" bytes");
-    Serial.println("   Fields: 28 (timestamp,pv[4],batt[4],ina[3],bms[9],load[4],env[3])");
 }
 
 void readPZEMData() {
     readPZEMDC(nodePanel, PZEMVoltagePanel, PZEMCurrentPanel, PZEMPowerPanel, PZEMEnergyPanel);
-    Serial.print("⚡PZEM-017 Panel:");
-    Serial.print(PZEMVoltagePanel, 1); Serial.print("V ");
-    Serial.print(PZEMCurrentPanel, 1); Serial.print("A ");
-    Serial.print(PZEMPowerPanel, 0); Serial.println("W");
-    Serial.print(PZEMEnergyPanel, 0); Serial.println("Wh");
     
-    delay(200);  // Kurangi dari 500ms menjadi 200ms
+    delay(200);
 
     readPZEMDC(nodeBattery, PZEMVoltageBattery, PZEMCurrentBattery, PZEMPowerBattery, PZEMEnergyBattery);
-    Serial.print("🔋 PZEM Batt: ");
-    Serial.print(PZEMVoltageBattery, 1); Serial.print("V ");
-    Serial.print(PZEMCurrentBattery, 1); Serial.print("A ");
-    Serial.print(PZEMPowerBattery, 0); Serial.println("W");
-    Serial.print(PZEMEnergyBattery, 0); Serial.println("W");
     
     delay(200);  // Kurangi dari 500ms menjadi 200ms
 
@@ -1156,8 +1025,6 @@ void readPZEMData() {
         PLTSEnergy = energyAC;
         PLTSHz = frequencyAC;
         PLTSPf = powerFactorAC;
-        Serial.print("☀ PLTS: ");
-        Serial.print(PLTSPower, 0); Serial.println("W");
     } else {
         GridVoltage = voltageAC;
         GridCurrent = currentAC;
@@ -1165,32 +1032,24 @@ void readPZEMData() {
         GridEnergy = energyAC;
         GridHz = frequencyAC;
         GridPf = powerFactorAC;
-        Serial.print("🌐 Grid: ");
-        Serial.print(GridPower, 0); Serial.println("W");
     }
-    delay(200);  // Kurangi dari 500ms menjadi 200ms
+    delay(200);
     
-    // ✅ FAST PATH: Update realtime data immediately (NON-BLOCKING)
+    // FAST PATH: Update realtime data immediately
     updateRealtimeData();
     
-    // ✅ FAST PATH: Send to ESP32 immediately if ESP32 data available
+    // FAST PATH: Send to ESP32 if ESP32 data available
     if (espDataReceived) {
         sendRealtimeToESP32();
-    } else {
-        Serial.println("⏳ [FAST PATH] Waiting for ESP32 data before sending");
     }
     
     // Initialize energy baseline if this is the first successful reading
     static bool energyBaselineInitialized = false;
     if (!energyBaselineInitialized && PZEMEnergyPanel > 0 && PZEMEnergyBattery > 0) {
-        if (energyBaseline.resetTime == 0) {  // No baseline loaded from SD
-            Serial.println("🔄 [ENERGY] First PZEM reading complete, initializing energy baseline...");
+        if (energyBaseline.resetTime == 0) {
             initializeEnergyBaseline();
-            energyBaselineInitialized = true;
-        } else {
-            energyBaselineInitialized = true;
-            Serial.println("✅ [ENERGY] Using loaded baseline from SD card");
         }
+        energyBaselineInitialized = true;
     }
 }
 
@@ -1208,33 +1067,15 @@ void readINA219Data() {
     ShuntVoltage = ina219.getShuntVoltage_mV();
     INA219Voltage = ina219.getBusVoltage_V();
     INA219Current = ina219.getCurrent_mA() / 1000.0;
-    Serial.println("INA219 Batt:");
-    Serial.print("Shunt Voltage: "); Serial.print(ShuntVoltage); Serial.print(" mV   ");
-    Serial.print("INA219 Voltage: "); Serial.print(INA219Voltage, 2); Serial.print(" V   ");
-    Serial.print("INA219 Current: "); Serial.print(INA219Current, 3); Serial.println(" A");
 }
 
-// Tambahkan fungsi ini di bawah fungsi readINA219Data()
-void sendDataToESP() {
-    String data = String(PZEMVoltagePanel) + "," + String(PZEMCurrentPanel) + "," + String(PZEMPowerPanel) + "," + String(PZEMEnergyPanel) + "," +
-                  String(PZEMVoltageBattery) + "," + String(PZEMCurrentBattery) + "," + String(PZEMPowerBattery) + "," + String(PZEMEnergyBattery) + "," +
-                  String(INA219Voltage) + "," + String(INA219Current) + "," + String(ShuntVoltage) + "\n";
-    Serial3.println(data); // Kirim ke ESP32
-    Serial.print("Data to ESP: ");
-    Serial.println(data);  // Debug di serial monitor STM
-}
+// sendDataToESP removed - use sendRealtimeToESP32 instead
 
 void addToFIFO(DataRecord data) {
     if (fifoCount < FIFO_SIZE) {
         fifoBuffer[fifoTail] = data;
         fifoTail = (fifoTail + 1) % FIFO_SIZE;
         fifoCount++;
-        Serial.print("📦 [FIFO] Data ditambahkan. Total: ");
-        Serial.print(fifoCount);
-        Serial.println("/");
-        Serial.println(FIFO_SIZE);
-    } else {
-        Serial.println("⚠ [FIFO] Buffer penuh! Data ditolak.");
     }
 }
 
@@ -1308,21 +1149,6 @@ void receiveESP32Data() {
                         updateTimeRef(espTimestamp);
                     }
                 }
-                
-                Serial.println("📡 [ESP32] 13-field format detected");
-                Serial.print("   Timestamp: "); Serial.println(espTimestamp);
-                Serial.print("   🌡 DS18B20: Lux:"); Serial.print(espLux, 1);
-                Serial.print(" T1:"); Serial.print(espTemp1, 1);
-                Serial.print("°C T2:"); Serial.print(espTemp2, 1); Serial.println("°C");
-                Serial.print("   🔋 BMS: V:"); Serial.print(espTotalVoltage, 2);
-                Serial.print("V I:"); Serial.print(espTotalCurrent, 2);
-                Serial.print("A SOC:"); Serial.print(espSOC, 1); Serial.println("%");
-                Serial.print("   🌡 BMS Temp: T1:"); Serial.print(espBMSTemp1, 1);
-                Serial.print("°C T2:"); Serial.print(espBMSTemp2, 1); Serial.println("°C");
-                Serial.print("   🔬 Cells: V1:"); Serial.print(espCellV1, 3);
-                Serial.print("V V2:"); Serial.print(espCellV2, 3);
-                Serial.print("V V3:"); Serial.print(espCellV3, 3);
-                Serial.print("V V4:"); Serial.print(espCellV4, 3); Serial.println("V");
                 
                 return;  // Exit after successful parsing
             }
@@ -1405,14 +1231,6 @@ void prepareCompleteData() {
     
     addToFIFO(newData);
     espDataReceived = false;
-    
-    Serial.print("📝 [BUFFER] Data ditambahkan! Timestamp: ");
-    Serial.print(newData.timestamp);
-    Serial.print(" | PendingWrites: ");
-    Serial.println(newData.pendingWrites);
-    Serial.print("   PZEMPV: V:"); Serial.print(newData.pzempv_v_pv, 2);
-    Serial.print("V | PZEMBATT: V:"); Serial.print(newData.pzembatt_v_batt, 2);
-    Serial.println("V");
 }
 
 // ===== FUNGSI MENULIS DATA KE PZEMPV.csv DARI BUFFER =====
@@ -1422,11 +1240,9 @@ void writePZEMPVFromBuffer() {
     }
     
     // Cek SD card sebelum menulis
-    Serial.println("🔍 [PZEMPV] Checking SD card before write...");
     bool sdReady = checkAndReinitializeSD();
     
     if (!sdReady) {
-        Serial.println("❌ [PZEMPV] SD Card tidak tersedia, skip penulisan (data tetap di buffer)");
         return;
     }
     
@@ -1461,16 +1277,9 @@ void writePZEMPVFromBuffer() {
                 file.print(data.pzempv_v_pv, 2); file.print("; ");
                 file.print(data.pzempv_i_pv, 3); file.print("; ");
                 file.print(data.pzempv_p_pv, 1); file.print("; ");
-                file.print(data.pzempv_e_pv, 0); file.println();  // <-- PERBAIKAN: tambah println()
+                file.print(data.pzempv_e_pv, 0); file.println();
                 file.flush();
                 file.close();
-                
-                Serial.print("✍  [PZEMPV] Data written - No: ");
-                Serial.print(data.no);
-                Serial.print(" | V:"); Serial.print(data.pzempv_v_pv, 2);
-                Serial.print("V I:"); Serial.print(data.pzempv_i_pv, 3);
-                Serial.print("A P:"); Serial.print(data.pzempv_p_pv, 1);
-                Serial.println("W");
                 
                 data.pendingWrites &= ~1;  // Clear bit 0
             } else {
@@ -1493,7 +1302,6 @@ void writePZEMBATTFromBuffer() {
     }
     
     // Cek SD card sebelum menulis
-    Serial.println("🔍 [PZEMBATT] Checking SD card before write...");
     bool sdReady = checkAndReinitializeSD();
     
     if (!sdReady) {
@@ -1917,14 +1725,7 @@ void logtoSDcard() {
     if (currentWriteState == WRITE_IDLE && !isFIFOEmpty()) {
         currentWriteState = WRITE_PZEMPV;
         writeStateTimer = millis();
-        Serial.println("⏱ [TRIGGER] Penulisan file dimulai");
     }
-    
-    // Display buffer status
-    Serial.print("📊 [FIFO Status] Count: ");
-    Serial.print(getFIFOCount());
-    Serial.print("/");
-    Serial.println(FIFO_SIZE);
 }
 
 void loop() {
@@ -2031,36 +1832,13 @@ void loop() {
             Serial.print("Reset Day: "); Serial.println(lastResetDay);
             Serial.print("Hours since reset: "); 
             Serial.println((millis() - lastEnergyReset) / 3600000.0);
-        } else if (command == "realtime" || command == "rt") {
-            Serial.println("📊 === REALTIME DATA STATUS ===");
-            Serial.print("Data Valid: "); Serial.println(realtimeData.dataValid ? "YES" : "NO");
-            Serial.print("Last Update: ");
-            if (lastRealtimeUpdate > 0) {
-                Serial.print((millis() - lastRealtimeUpdate) / 1000.0);
-                Serial.println(" seconds ago");
-            } else {
-                Serial.println("NEVER");
-            }
-            Serial.print("Timestamp: "); Serial.println(realtimeData.timestamp);
-            Serial.println("\n--- PZEM Panel ---");
-            Serial.print("V: "); Serial.print(realtimeData.pzem_panel_v, 2); Serial.println(" V");
-            Serial.print("I: "); Serial.print(realtimeData.pzem_panel_i, 3); Serial.println(" A");
-            Serial.print("P: "); Serial.print(realtimeData.pzem_panel_p, 1); Serial.println(" W");
-            Serial.print("E: "); Serial.print(realtimeData.pzem_panel_e, 0); Serial.println(" Wh");
-            Serial.println("\n--- PZEM Battery ---");
-            Serial.print("V: "); Serial.print(realtimeData.pzem_batt_v, 2); Serial.println(" V");
-            Serial.print("I: "); Serial.print(realtimeData.pzem_batt_i, 3); Serial.println(" A");
-            Serial.print("P: "); Serial.print(realtimeData.pzem_batt_p, 1); Serial.println(" W");
-            Serial.print("E: "); Serial.print(realtimeData.pzem_batt_e, 0); Serial.println(" Wh");
-            Serial.println("\n--- BMS ---");
-            Serial.print("Total V: "); Serial.print(realtimeData.bms_total_v, 2); Serial.println(" V");
-            Serial.print("Total I: "); Serial.print(realtimeData.bms_total_i, 2); Serial.println(" A");
-            Serial.print("SOC: "); Serial.print(realtimeData.bms_soc, 1); Serial.println(" %");
-            Serial.print("Cells: V1="); Serial.print(realtimeData.bms_v1, 3);
-            Serial.print(" V2="); Serial.print(realtimeData.bms_v2, 3);
-            Serial.print(" V3="); Serial.print(realtimeData.bms_v3, 3);
-            Serial.print(" V4="); Serial.print(realtimeData.bms_v4, 3); Serial.println();
-            Serial.println("=================================");
+        } else if (command == "rt") {
+            Serial.print("RT:");
+            Serial.print(realtimeData.pzem_panel_v);
+            Serial.print(",");
+            Serial.print(realtimeData.pzem_batt_v);
+            Serial.print(",");
+            Serial.println(realtimeData.bms_soc);
         } else if (command == "sendrt" || command == "sendnow") {
             Serial.println("📤 [MANUAL] Sending realtime data to ESP32...");
             if (realtimeData.dataValid) {
