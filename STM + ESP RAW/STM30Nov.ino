@@ -962,48 +962,26 @@ void updateRealtimeData() {
     lastRealtimeUpdate = millis();
 }
 
-// ===== FAST PATH: SEND REALTIME DATA TO ESP32 (NON-BLOCKING) =====
+// ===== FAST PATH: SEND REALTIME DATA TO ESP32 (11-FIELD FORMAT) =====
 void sendRealtimeToESP32() {
     if (!realtimeData.dataValid) {
-        Serial.println("⚠ [FAST PATH] No valid realtime data to send");
         return;
     }
     
-    // Format: All sensor data in one line (CSV format) - 28 fields
-    String data = String(realtimeData.timestamp) + "," +
-                  // PZEM Panel (4 fields)
-                  String(realtimeData.pzem_panel_v, 2) + "," +
+    // Format 11-field sesuai ekspektasi ESP32:
+    // PVVoltage,PVCurrent,PVPower,PVEnergy,BattVoltage,BattCurrent,BattPower,BattEnergy,INA219Voltage,INA219Current,ShuntVoltage
+    // BMS data tidak perlu dikirim (ESP32 sudah punya) - hanya PZEM + INA219
+    String data = String(realtimeData.pzem_panel_v, 2) + "," +
                   String(realtimeData.pzem_panel_i, 3) + "," +
                   String(realtimeData.pzem_panel_p, 1) + "," +
                   String(realtimeData.pzem_panel_e, 0) + "," +
-                  // PZEM Battery (4 fields)
                   String(realtimeData.pzem_batt_v, 2) + "," +
                   String(realtimeData.pzem_batt_i, 3) + "," +
                   String(realtimeData.pzem_batt_p, 1) + "," +
                   String(realtimeData.pzem_batt_e, 0) + "," +
-                  // INA219 (3 fields)
                   String(realtimeData.ina_voltage, 2) + "," +
                   String(realtimeData.ina_current, 3) + "," +
-                  String(realtimeData.shunt_voltage, 2) + "," +
-                  // BMS (9 fields)
-                  String(realtimeData.bms_v1, 3) + "," +
-                  String(realtimeData.bms_v2, 3) + "," +
-                  String(realtimeData.bms_v3, 3) + "," +
-                  String(realtimeData.bms_v4, 3) + "," +
-                  String(realtimeData.bms_total_v, 2) + "," +
-                  String(realtimeData.bms_total_i, 2) + "," +
-                  String(realtimeData.bms_soc, 1) + "," +
-                  String(realtimeData.bms_temp1, 1) + "," +
-                  String(realtimeData.bms_temp2, 1) + "," +
-                  // Load (4 fields)
-                  String(realtimeData.grid_power, 1) + "," +
-                  String(realtimeData.grid_energy, 0) + "," +
-                  String(realtimeData.plts_power, 1) + "," +
-                  String(realtimeData.plts_energy, 0) + "," +
-                  // Environment (3 fields)
-                  String(realtimeData.lux, 1) + "," +
-                  String(realtimeData.temp1, 1) + "," +
-                  String(realtimeData.temp2, 1) + "\n";
+                  String(realtimeData.shunt_voltage, 2) + "\n";
     
     Serial3.print(data);
 }
