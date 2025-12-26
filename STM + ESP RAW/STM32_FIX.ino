@@ -1516,7 +1516,9 @@ void loop() {
         command.toLowerCase();
         
         if (command == "sd" || command == "sdtest") {
-            debugSDCard();
+            Serial.println("SD Check...");
+            bool result = checkAndReinitializeSD();
+            Serial.println(result ? "OK" : "FAILED");
         } else if (command == "sdcheck") {
             Serial.println("🔍 Manual SD Check...");
             bool result = checkAndReinitializeSD();
@@ -1585,7 +1587,10 @@ void loop() {
             Serial.print("BMS Current: "); Serial.print(espTotalCurrent, 2); Serial.println(" A");
             Serial.print("BMS SOC: "); Serial.print(espSOC, 1); Serial.println(" %");
         } else if (command == "timeref" || command == "timeinfo") {
-            debugTimeRef();
+            Serial.println("TimeRef Info:");
+            Serial.print("Available: "); Serial.println(timeRefAvailable ? "YES" : "NO");
+            Serial.print("TimeRef: "); Serial.println(globalTimeRef);
+            Serial.print("Current: "); Serial.println(getCurrentTimestamp());
         } else if (command.startsWith("settime ")) {
             // Command: settime 1730794225
             String timestampStr = command.substring(8);
