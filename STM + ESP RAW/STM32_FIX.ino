@@ -752,11 +752,14 @@ void readINA219Data() {
 
 // Tambahkan fungsi ini di bawah fungsi readINA219Data()
 void sendDataToESP() {
+    // 15 field: PV(4) + Battery(4) + INA219(3) + PLTS Load(2) + Grid(2)
     String data = String(PZEMVoltagePanel) + "," + String(PZEMCurrentPanel) + "," + String(PZEMPowerPanel) + "," + String(PZEMEnergyPanel) + "," +
                   String(PZEMVoltageBattery) + "," + String(PZEMCurrentBattery) + "," + String(PZEMPowerBattery) + "," + String(PZEMEnergyBattery) + "," +
-                  String(INA219Voltage) + "," + String(INA219Current) + "," + String(ShuntVoltage) + "\n";
+                  String(INA219Voltage) + "," + String(INA219Current) + "," + String(ShuntVoltage) + "," +
+                  String(PLTSPower) + "," + String(PLTSEnergy) + "," +  // Field 11-12: PLTS Load
+                  String(GridPower) + "," + String(GridEnergy) + "\n";   // Field 13-14: Grid
     Serial3.println(data); // Kirim ke ESP32
-    Serial.print("Data to ESP: ");
+    Serial.print("Data to ESP (15 fields): ");
     Serial.println(data);  // Debug di serial monitor STM
 }
 
