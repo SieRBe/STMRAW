@@ -497,72 +497,16 @@ bool checkAndReinitializeSD() {
 }
 
 // ===== FUNGSI DEBUG SD CARD MANUAL =====
-void debugSDCard() {
-    Serial.println("\n=================== SD CARD DEBUG ===================");
-    
-    // Test 1: Cek status SPI1
-    Serial.print("🔧 SPI NSS Pin Status: ");
-    Serial.println(digitalRead(SPI1_NSS_PIN) ? "HIGH" : "LOW");
-    
-    // Test 2: Coba akses direktori root
-    Serial.println("📁 Testing root directory access...");
-    digitalWrite(SPI1_NSS_PIN, LOW);
-    delay(50);
-    
-    File root = SD.open("/");
-    if (root) {
-        Serial.println("✅ Root directory accessible");
-        root.close();
-    } else {
-        Serial.println("❌ Root directory NOT accessible");
-    }
-    
-    // Test 3: Cek keberadaan file CSV
-    Serial.println("📋 Checking CSV files...");
-    Serial.print("   PZEMPV.csv: ");
-    Serial.println(SD.exists("/PZEMPV.csv") ? "EXISTS" : "MISSING");
-    Serial.print("   PZEMBATT.csv: ");
-    Serial.println(SD.exists("/PZEMBATT.csv") ? "EXISTS" : "MISSING");
-    Serial.print("   BMS.csv: ");
-    Serial.println(SD.exists("/BMS.csv") ? "EXISTS" : "MISSING");
-    Serial.print("   LOAD.csv: ");
-    Serial.println(SD.exists("/LOAD.csv") ? "EXISTS" : "MISSING");
-
-    // Test 4: Coba tulis file test
-    Serial.println("✍  Testing write capability...");
-    File testFile = SD.open("/test.txt", FILE_WRITE);
-    if (testFile) {
-        testFile.println("SD Test - " + String(millis()));
-        testFile.flush();
-        testFile.close();
-        Serial.println("✅ Write test SUCCESS");
-        SD.remove("/test.txt");  // Hapus file test
-    } else {
-        Serial.println("❌ Write test FAILED");
-    }
-    
-    digitalWrite(SPI1_NSS_PIN, HIGH);
-    
-    // Test 5: Panggil fungsi check
-    Serial.println("🔍 Testing checkAndReinitializeSD() function...");
-    bool result = checkAndReinitializeSD();
-    Serial.print("   Result: ");
-    Serial.println(result ? "SUCCESS" : "FAILED");
-    
-    Serial.println("=================== DEBUG COMPLETE ===================\n");
-}
+// debugSDCard() removed to save memory
 
 // ===== FUNGSI TIMEREF FILE MANAGEMENT =====
 void initializeTimeRef() {
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
-    // Cek apakah file timeref.txt sudah ada
     if (SD.exists("/timeref.txt")) {
-        Serial.println("📅 [TIMEREF] Found existing timeref.txt, loading...");
         loadTimeRefFromSD();
     } else {
-        Serial.println("📅 [TIMEREF] No timeref.txt found, will create on first timestamp");
         timeRefAvailable = false;
         globalTimeRef = 0;
         globalTimeRefBaseMillis = 0;
@@ -577,7 +521,6 @@ bool loadTimeRefFromSD() {
     
     File timeRefFile = SD.open("/timeref.txt", FILE_READ);
     if (!timeRefFile) {
-        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for reading");
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return false;
     }
@@ -591,126 +534,86 @@ bool loadTimeRefFromSD() {
         globalTimeRef = line.toInt();
         globalTimeRefBaseMillis = millis();
         timeRefAvailable = true;
-        
-        Serial.print("✅ [TIMEREF] Loaded timestamp: ");
-        Serial.print(globalTimeRef);
-        Serial.print(" at millis: ");
-        Serial.println(globalTimeRefBaseMillis);
         return true;
-    } else {
-        Serial.println("❌ [TIMEREF] Invalid timeref.txt content");
-        return false;
     }
+    return false;
 }
 
 bool saveTimeRefToSD(unsigned long timestamp) {
-    if (!sdCardAvailable) {
-        Serial.println("❌ [TIMEREF] SD card not available, cannot save timeref");
-        return false;
-    }
+    if (!sdCardAvailable) return false;
     
     digitalWrite(SPI1_NSS_PIN, LOW);
     delay(10);
     
     File timeRefFile = SD.open("/timeref.txt", FILE_WRITE);
     if (!timeRefFile) {
-        Serial.println("❌ [TIMEREF] Failed to open timeref.txt for writing");
         digitalWrite(SPI1_NSS_PIN, HIGH);
         return false;
     }
     
-    // Truncate file dan tulis timestamp baru
     timeRefFile.seek(0);
     timeRefFile.println(timestamp);
     timeRefFile.flush();
     timeRefFile.close();
     digitalWrite(SPI1_NSS_PIN, HIGH);
     
-    Serial.print("💾 [TIMEREF] Saved timestamp: ");
-    Serial.println(timestamp);
     return true;
 }
 
 void updateTimeRef(unsigned long newTimestamp) {
-    // Update timestamp referensi global
     globalTimeRef = newTimestamp;
     globalTimeRefBaseMillis = millis();
     timeRefAvailable = true;
     lastTimeRefUpdate = millis();
-    
-    // Simpan ke SD card
     saveTimeRefToSD(newTimestamp);
-    
-    Serial.print("🕐 [TIMEREF] Updated global timeref to: ");
-    Serial.print(globalTimeRef);
-    Serial.print(" (base millis: ");
-    Serial.print(globalTimeRefBaseMillis);
-    Serial.println(")");
 }
 
 // ===== FUNGSI KONTROL RELAY VIA COMMAND DARI ESP32 =====
 void handleRelayCommand(String command) {
     command.trim();
     
-    Serial.print("🎛️ [RELAY CMD] Received: ");
-    Serial.println(command);
-    
-    // Command format: RELAY_NAME_ACTION
     if (command == "RELAY_INV_ON") {
         digitalWrite(RELAY_Inv, HIGH);
-        Serial.println("✅ Inverter Relay: ON");
-        // Send confirmation back to ESP32
         Serial3.println("RELAY_INV_STATUS:ON");
     }
     else if (command == "RELAY_INV_OFF") {
         digitalWrite(RELAY_Inv, LOW);
-        Serial.println("✅ Inverter Relay: OFF");
         Serial3.println("RELAY_INV_STATUS:OFF");
     }
     else if (command == "RELAY_BATT_ON") {
         digitalWrite(RELAY_Batt, HIGH);
-        Serial.println("✅ Battery Relay: ON");
         Serial3.println("RELAY_BATT_STATUS:ON");
     }
     else if (command == "RELAY_BATT_OFF") {
         digitalWrite(RELAY_Batt, LOW);
-        Serial.println("✅ Battery Relay: OFF");
         Serial3.println("RELAY_BATT_STATUS:OFF");
     }
     else if (command == "RELAY_ATS_N_ON") {
         digitalWrite(RELAY_ATS_N, HIGH);
-        Serial.println("✅ ATS Normal Relay: ON");
         Serial3.println("RELAY_ATS_N_STATUS:ON");
     }
     else if (command == "RELAY_ATS_N_OFF") {
         digitalWrite(RELAY_ATS_N, LOW);
-        Serial.println("✅ ATS Normal Relay: OFF");
         Serial3.println("RELAY_ATS_N_STATUS:OFF");
     }
     else if (command == "RELAY_ATS_F_ON") {
         digitalWrite(RELAY_ATS_F, HIGH);
-        Serial.println("✅ ATS Fail Relay: ON");
         Serial3.println("RELAY_ATS_F_STATUS:ON");
     }
     else if (command == "RELAY_ATS_F_OFF") {
         digitalWrite(RELAY_ATS_F, LOW);
-        Serial.println("✅ ATS Fail Relay: OFF");
         Serial3.println("RELAY_ATS_F_STATUS:OFF");
     }
-    // Get all relay status
     else if (command == "GET_RELAY_STATUS") {
-        String status = "RELAY_STATUS:";
-        status += "INV=" + String(digitalRead(RELAY_Inv) ? "ON" : "OFF") + ",";
-        status += "BATT=" + String(digitalRead(RELAY_Batt) ? "ON" : "OFF") + ",";
-        status += "ATS_N=" + String(digitalRead(RELAY_ATS_N) ? "ON" : "OFF") + ",";
-        status += "ATS_F=" + String(digitalRead(RELAY_ATS_F) ? "ON" : "OFF");
-        Serial3.println(status);
-        Serial.println("📊 Relay status sent to ESP32");
-    }
-    else {
-        Serial.print("❌ Unknown relay command: ");
-        Serial.println(command);
-        Serial3.println("RELAY_ERROR:UNKNOWN_COMMAND");
+        String s = "RELAY_STATUS:INV=";
+        s += digitalRead(RELAY_Inv) ? "ON," : "OFF,";
+        s += "BATT=";
+        s += digitalRead(RELAY_Batt) ? "ON," : "OFF,";
+        s += "ATS_N=";
+        s += digitalRead(RELAY_ATS_N) ? "ON," : "OFF,";
+        s += "ATS_F=";
+        s += digitalRead(RELAY_ATS_F) ? "ON" : "OFF";
+        Serial3.println(s);
     }
 }
 
@@ -734,10 +637,7 @@ unsigned long getCurrentTimestamp() {
     
     // Handle millis overflow (reset setelah ~49 hari)
     if (currentMillis < globalTimeRefBaseMillis) {
-        // Millis overflow terdeteksi, reset base
-        Serial.println("⚠ [TIMEREF] Millis overflow detected, recalibrating...");
         globalTimeRefBaseMillis = currentMillis;
-        // Simpan ulang timeref
         saveTimeRefToSD(globalTimeRef);
     }
     
@@ -759,32 +659,7 @@ String getFormattedTimestampFromRef() {
     return String(timestamp);
 }
 
-void debugTimeRef() {
-    Serial.println("\n=================== TIMEREF DEBUG ===================");
-    Serial.print("TimeRef Available: "); Serial.println(timeRefAvailable ? "YES" : "NO");
-    Serial.print("Global TimeRef: "); Serial.println(globalTimeRef);
-    Serial.print("Base Millis: "); Serial.println(globalTimeRefBaseMillis);
-    Serial.print("Current Millis: "); Serial.println(millis());
-    Serial.print("Current Timestamp: "); Serial.println(getCurrentTimestamp());
-    Serial.print("Last Update: "); Serial.print(millis() - lastTimeRefUpdate); Serial.println(" ms ago");
-    
-    // Test read timeref.txt
-    digitalWrite(SPI1_NSS_PIN, LOW);
-    if (SD.exists("/timeref.txt")) {
-        File timeRefFile = SD.open("/timeref.txt", FILE_READ);
-        if (timeRefFile) {
-            Serial.print("TimeRef File Content: ");
-            String content = timeRefFile.readStringUntil('\n');
-            Serial.println(content);
-            timeRefFile.close();
-        }
-    } else {
-        Serial.println("TimeRef File: NOT EXISTS");
-    }
-    digitalWrite(SPI1_NSS_PIN, HIGH);
-    
-    Serial.println("=================== TIMEREF DEBUG END ===================\n");
-}
+// debugTimeRef() removed to save memory
 
 void postTransmission() {
   delay(3);
@@ -827,22 +702,20 @@ void readPZEMAC(ModbusMaster &node, float &voltageAC, float &currentAC, float &p
 
 void readPZEMData() {
     readPZEMDC(nodePanel, PZEMVoltagePanel, PZEMCurrentPanel, PZEMPowerPanel, PZEMEnergyPanel);
-    Serial.print("⚡PZEM-017 Panel:");
+    Serial.print("PV: ");
     Serial.print(PZEMVoltagePanel, 1); Serial.print("V ");
     Serial.print(PZEMCurrentPanel, 1); Serial.print("A ");
     Serial.print(PZEMPowerPanel, 0); Serial.println("W");
-    Serial.print(PZEMEnergyPanel, 0); Serial.println("Wh");
     
-    delay(200);  // Kurangi dari 500ms menjadi 200ms
+    delay(200);
 
     readPZEMDC(nodeBattery, PZEMVoltageBattery, PZEMCurrentBattery, PZEMPowerBattery, PZEMEnergyBattery);
-    Serial.print("🔋 PZEM Batt: ");
+    Serial.print("Batt: ");
     Serial.print(PZEMVoltageBattery, 1); Serial.print("V ");
     Serial.print(PZEMCurrentBattery, 1); Serial.print("A ");
     Serial.print(PZEMPowerBattery, 0); Serial.println("W");
-    Serial.print(PZEMEnergyBattery, 0); Serial.println("W");
     
-    delay(200);  // Kurangi dari 500ms menjadi 200ms
+    delay(200);
 
     readPZEMAC(nodeAC, voltageAC, currentAC, powerAC, energyAC, frequencyAC, powerFactorAC);
     if (isPLTS) {
@@ -852,7 +725,7 @@ void readPZEMData() {
         PLTSEnergy = energyAC;
         PLTSHz = frequencyAC;
         PLTSPf = powerFactorAC;
-        Serial.print("☀ PLTS: ");
+        Serial.print("PLTS: ");
         Serial.print(PLTSPower, 0); Serial.println("W");
     } else {
         GridVoltage = voltageAC;
@@ -861,10 +734,10 @@ void readPZEMData() {
         GridEnergy = energyAC;
         GridHz = frequencyAC;
         GridPf = powerFactorAC;
-        Serial.print("🌐 Grid: ");
+        Serial.print("Grid: ");
         Serial.print(GridPower, 0); Serial.println("W");
     }
-    delay(200);  // Kurangi dari 500ms menjadi 200ms
+    delay(200);
 }
 
 void readINA219Data() {
@@ -892,12 +765,6 @@ void addToFIFO(DataRecord data) {
         fifoBuffer[fifoTail] = data;
         fifoTail = (fifoTail + 1) % FIFO_SIZE;
         fifoCount++;
-        Serial.print("📦 [FIFO] Data ditambahkan. Total: ");
-        Serial.print(fifoCount);
-        Serial.println("/");
-        Serial.println(FIFO_SIZE);
-    } else {
-        Serial.println("⚠ [FIFO] Buffer penuh! Data ditolak.");
     }
 }
 
@@ -926,36 +793,21 @@ void receiveESP32Data() {
         String receivedData = Serial3.readStringUntil('\n');
         receivedData.trim();
         
-        // Debug: Print raw received data
-        Serial.print("📥 [ESP32] Raw data: ");
-        Serial.println(receivedData);
-        
-        // === DETEKSI FORMAT DATA ===
-        // 1. Relay Command (format: RELAY_XXX_YYY)
+        // 1. Relay Command
         if (receivedData.startsWith("RELAY_")) {
             handleRelayCommand(receivedData);
-            return;  // Exit setelah handle command
+            return;
         }
         
-        // 2. Timestamp Sync Command
+        // 2. Timestamp Sync
         if (receivedData.startsWith("TIMESTAMP_SYNC,")) {
-            // Parse: TIMESTAMP_SYNC,timestamp,status
             int firstComma = receivedData.indexOf(',');
             int secondComma = receivedData.indexOf(',', firstComma + 1);
             
             if (firstComma > 0 && secondComma > 0) {
                 String timestampStr = receivedData.substring(firstComma + 1, secondComma);
-                String syncStatus = receivedData.substring(secondComma + 1);
-                
                 unsigned long newTimestamp = strtoul(timestampStr.c_str(), NULL, 10);
                 
-                Serial.print("⏰ [TIMESTAMP] Sync received: ");
-                Serial.print(newTimestamp);
-                Serial.print(" (");
-                Serial.print(syncStatus);
-                Serial.println(")");
-                
-                // Update timeref jika valid
                 if (newTimestamp > 1000000 && newTimestamp > globalTimeRef) {
                     updateTimeRef(newTimestamp);
                 }
@@ -963,20 +815,17 @@ void receiveESP32Data() {
             return;
         }
         
-        // 3. Sensor Data (format: 13 fields CSV)
-        // Count commas untuk deteksi format
+        // 3. Sensor Data (13 fields)
         int commaCount = 0;
         for (int i = 0; i < receivedData.length(); i++) {
             if (receivedData.charAt(i) == ',') commaCount++;
         }
         
-        // Format: timestamp,lux,temp1,temp2,voltage,current,soc,bms_temp1,bms_temp2,v1,v2,v3,v4
         if (commaCount == 12) {
             int pos[13];
             pos[0] = 0;
             int commaIndex = 1;
             
-            // Find all comma positions
             for (int i = 0; i < receivedData.length() && commaIndex < 13; i++) {
                 if (receivedData.charAt(i) == ',') {
                     pos[commaIndex++] = i;
@@ -984,13 +833,8 @@ void receiveESP32Data() {
             }
             
             if (commaIndex == 13) {
-                // Parse 13 fields
-                // PERBAIKAN: Parse timestamp sebagai unsigned long
                 String timestampStr = receivedData.substring(pos[0], pos[1]);
                 espTimestamp = strtoul(timestampStr.c_str(), NULL, 10);
-                
-                // Debug timestamp parsing
-                Serial.print("   Timestamp string: '");
                 Serial.print(timestampStr);
                 Serial.print("' -> parsed: ");
                 Serial.println(espTimestamp);
