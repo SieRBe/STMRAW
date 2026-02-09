@@ -158,10 +158,11 @@ unsigned long startMillisSDCheck;
 unsigned long currentMillisSDCheck;
 const unsigned long periodSDCheck = 60000;  // 30 detik
 
-// Timer untuk Reset Energi PZEM (setiap 24 jam)
+// Timer untuk Reset Energi PZEM (setiap jam 00:00 WIB)
 unsigned long lastEnergyResetTimestamp = 0;  // Timestamp terakhir reset energi
-const unsigned long energyResetInterval = 86400;  // 24 jam dalam detik (86400)
 bool energyResetInitialized = false;  // Flag untuk inisialisasi pertama kali
+int lastResetDay = -1;  // Hari terakhir reset dilakukan (-1 = belum pernah)
+const int TIMEZONE_OFFSET = 7 * 3600;  // WIB = UTC+7 (dalam detik)
 
 // Status SD Card
 bool sdCardAvailable = true;
@@ -622,6 +623,21 @@ void handleRelayCommand(String command) {
     }
 }
 
+// ===== FUNGSI HELPER UNTUK WAKTU =====
+// Mendapatkan jam saat ini (0-23) dari Unix timestamp dengan timezone WIB
+int getCurrentHour() {
+    unsigned long ts = getCurrentTimestamp();
+    unsigned long localTs = ts + TIMEZONE_OFFSET;  // Konversi ke WIB
+    return (localTs % 86400) / 3600;  // 86400 detik per hari, 3600 detik per jam
+}
+
+// Mendapatkan hari dalam tahun dari Unix timestamp (untuk tracking reset harian)
+int getDayOfYear() {
+    unsigned long ts = getCurrentTimestamp();
+    unsigned long localTs = ts + TIMEZONE_OFFSET;  // Konversi ke WIB
+    return (localTs / 86400);  // Jumlah hari sejak epoch
+}
+
 unsigned long getCurrentTimestamp() {
     if (!timeRefAvailable) {
         // FALLBACK MECHANISM - prioritas:
@@ -694,7 +710,7 @@ bool resetPZEMEnergy(ModbusMaster &node, const char* name) {
 }
 
 void resetAllPZEMEnergy() {
-    Serial.println("\n🔄 [RESET] Starting 24-hour energy reset for all PZEM...");
+    Serial.println("\n🔄 [RESET] Starting midnight energy reset for all PZEM...");
     
     // Reset PZEM Panel (PV)
     delay(200);
@@ -708,36 +724,42 @@ void resetAllPZEMEnergy() {
     delay(200);
     resetPZEMEnergy(nodeAC, "PZEM AC");
     
-    // Update timestamp terakhir reset
+    // Update timestamp dan hari terakhir reset
     lastEnergyResetTimestamp = getCurrentTimestamp();
+    lastResetDay = getDayOfYear();
     
-    Serial.print("✅ [RESET] All energy counters reset complete at timestamp: ");
+    Serial.print("[RESET] Done at timestamp: ");
     Serial.println(lastEnergyResetTimestamp);
-    Serial.println("⏰ [RESET] Next reset will occur in 24 hours\n");
+    Serial.println("[RESET] Next reset at 12:00 WIB (TEST MODE)\n");
 }
 
 void checkAndResetEnergy() {
-    // Inisialisasi timestamp pertama kali
-    if (!energyResetInitialized && timeRefAvailable) {
-        lastEnergyResetTimestamp = getCurrentTimestamp();
-        energyResetInitialized = true;
-        Serial.println("🔧 [RESET] Energy reset timer initialized");
-        return;
-    }
-    
     // Skip jika timeref belum tersedia
     if (!timeRefAvailable) {
         return;
     }
     
-    unsigned long currentTimestamp = getCurrentTimestamp();
-    unsigned long elapsedSeconds = currentTimestamp - lastEnergyResetTimestamp;
+    // Inisialisasi pertama kali
+    if (!energyResetInitialized) {
+        lastEnergyResetTimestamp = getCurrentTimestamp();
+        lastResetDay = getDayOfYear();
+        energyResetInitialized = true;
+        Serial.println("🔧 [RESET] Energy reset timer initialized");
+        Serial.print("   Current day: "); Serial.println(lastResetDay);
+        return;
+    }
     
-    // Cek apakah sudah 24 jam (86400 detik)
-    if (elapsedSeconds >= energyResetInterval) {
-        Serial.print("⏰ [RESET] 24 hours elapsed (");
-        Serial.print(elapsedSeconds);
-        Serial.println(" seconds)");
+    // Dapatkan jam dan hari saat ini
+    int currentHour = getCurrentHour();
+    int currentDay = getDayOfYear();
+    
+    // Reset energi jika:
+    // 1. Jam saat ini adalah 12 (siang) - TESTING MODE
+    // 2. Belum reset hari ini
+    if (currentHour == 12 && currentDay != lastResetDay) {
+        Serial.println("[RESET] Noon detected (12:00 WIB) - TEST MODE");
+        Serial.print("   Previous reset day: "); Serial.println(lastResetDay);
+        Serial.print("   Current day: "); Serial.println(currentDay);
         
         resetAllPZEMEnergy();
     }
@@ -1641,24 +1663,49 @@ void loop() {
         } else if (command == "resetenergy" || command == "energyreset") {
             Serial.println("🔄 [MANUAL] Force energy reset...");
             resetAllPZEMEnergy();
-        } else if (command == "energyinfo" || command == "energystatus") {
-            Serial.println("📊 === ENERGY RESET STATUS ===");
-            Serial.print("Initialized: "); Serial.println(energyResetInitialized ? "YES" : "NO");
-            Serial.print("Last Reset Timestamp: "); Serial.println(lastEnergyResetTimestamp);
-            Serial.print("Current Timestamp: "); Serial.println(getCurrentTimestamp());
-            if (energyResetInitialized && timeRefAvailable) {
-                unsigned long elapsed = getCurrentTimestamp() - lastEnergyResetTimestamp;
-                Serial.print("Time Since Last Reset: "); Serial.print(elapsed); Serial.println(" seconds");
-                Serial.print("Time Until Next Reset: "); Serial.print(energyResetInterval - elapsed); Serial.println(" seconds");
-                Serial.print("Hours Until Next Reset: "); Serial.println((energyResetInterval - elapsed) / 3600.0, 1);
+        } else if (command == "dummyenergy" || command == "setdummy") {
+            // Suntik data energy dummy untuk testing
+            Serial.println("🧪 [TEST] Injecting dummy energy values...");
+            PZEMEnergyPanel = 1234.0;
+            PZEMEnergyBattery = 5678.0;
+            PLTSEnergy = 9012.0;
+            GridEnergy = 3456.0;
+            Serial.println("✅ Dummy energy values set:");
+            Serial.print("   PV Energy: "); Serial.print(PZEMEnergyPanel, 0); Serial.println(" Wh");
+            Serial.print("   Battery Energy: "); Serial.print(PZEMEnergyBattery, 0); Serial.println(" Wh");
+            Serial.print("   PLTS Energy: "); Serial.print(PLTSEnergy, 0); Serial.println(" Wh");
+            Serial.print("   Grid Energy: "); Serial.print(GridEnergy, 0); Serial.println(" Wh");
+            Serial.println("💡 Now use 'resetenergy' to test reset function");
+        } else if (command.startsWith("setenergy ")) {
+            // Format: setenergy 500 (set semua ke 500 Wh)
+            String params = command.substring(10);
+            params.trim();
+            float val = params.toFloat();
+            if (val >= 0) {
+                PZEMEnergyPanel = val;
+                PZEMEnergyBattery = val;
+                PLTSEnergy = val;
+                GridEnergy = val;
+                Serial.println("✅ All energy values set to:");
+                Serial.print("   "); Serial.print(val, 0); Serial.println(" Wh");
             } else {
-                Serial.println("⚠️ Waiting for TimeRef initialization...");
+                Serial.println("❌ Invalid value. Usage: setenergy 500");
             }
-            Serial.println("--- CURRENT ENERGY VALUES ---");
-            Serial.print("PV Energy: "); Serial.print(PZEMEnergyPanel, 0); Serial.println(" Wh");
-            Serial.print("Battery Energy: "); Serial.print(PZEMEnergyBattery, 0); Serial.println(" Wh");
-            Serial.print("PLTS Energy: "); Serial.print(PLTSEnergy, 0); Serial.println(" Wh");
-            Serial.print("Grid Energy: "); Serial.print(GridEnergy, 0); Serial.println(" Wh");
+        } else if (command == "energyinfo" || command == "energystatus") {
+            Serial.println("=== ENERGY STATUS (TEST:12:00) ===");
+            Serial.print("Init: "); Serial.println(energyResetInitialized ? "Y" : "N");
+            Serial.print("Last Day: "); Serial.println(lastResetDay);
+            Serial.print("Now Day: "); Serial.println(getDayOfYear());
+            Serial.print("Hour(WIB): "); Serial.println(getCurrentHour());
+            if (energyResetInitialized && timeRefAvailable) {
+                int h = (12 - getCurrentHour() + 24) % 24;  // Hours until 12:00
+                if (h == 0 && getDayOfYear() == lastResetDay) h = 24;
+                Serial.print("Next reset @12:00: "); Serial.print(h); Serial.println("h");
+            }
+            Serial.print("PV:"); Serial.print(PZEMEnergyPanel, 0);
+            Serial.print(" Bat:"); Serial.print(PZEMEnergyBattery, 0);
+            Serial.print(" PLTS:"); Serial.print(PLTSEnergy, 0);
+            Serial.print(" Grid:"); Serial.println(GridEnergy, 0);
         }
     }
 
