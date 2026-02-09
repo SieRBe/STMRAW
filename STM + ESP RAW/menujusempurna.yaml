@@ -1,0 +1,1134 @@
+5][W][stm32_data:1087]: ❌ Invalid STM32 data format. Expected 11 or 8 fields, got 13
+[13:37:27.741][W][stm32_data:1088]:    New format (11): PVVoltage,PVCurrent,PVPower,PVEnergy,BattVoltage,BattCurrent,BattPower,BattEnergy,INA219Voltage,INA219Current,ShuntVoltage
+[13:37:27.753][W][stm32_data:1089]:    Old format (8): pv_voltage,pv_current,pv_power,batt_voltage,batt_current,batt_power,ina_voltage,ina_current
+
+substitutions:
+  name: fixgoal2
+  device_description: "Monitor a DALY Battery Management System via BLE"
+  external_components_source: github://syssi/esphome-daly-bms@main
+  mac_address: "41:18:11:01:0B:C2"
+  # ===== UBAH SSID DAN PASSWORD WIFI ANDA DI SINI =====
+  ssid_name: "GANTI_DENGAN_NAMA_WIFI_ANDA"
+  wifi_password: "GANTI_DENGAN_PASSWORD_WIFI_ANDA"
+  # ====================================================
+
+esphome:
+  name: ${name}
+  comment: ${device_description}
+  min_version: 2024.6.0
+  project:
+    name: "syssi.esphome-daly-bms"
+    version: 1.0.0
+  on_boot:
+    priority: -100
+    then:
+      - logger.log: "ESP32 booting... initializing NTP sync and STM32 communication"
+      - delay: 5s
+      - logger.log: "Waiting for WiFi connection..."
+      - wait_until:
+          condition:
+            lambda: 'return id(wifi_rssi).state > -100;'
+          timeout: 60s
+      - if:
+          condition:
+            lambda: 'return id(wifi_rssi).state > -100;'
+          then:
+            - logger.log: "WiFi connected, forcing NTP sync..."
+            - lambda: |-
+                ESP_LOGI("main", "📶 WiFi connected, RSSI: %.0f dBm", id(wifi_rssi).state);
+                ESP_LOGI("main", "");
+                ESP_LOGI("main", "⚠️  IMPORTANT: MQTT Broker must be on same network!");
+                ESP_LOGI("main", "📍 Current MQTT Broker: 10.60.148.200:1883");
+                ESP_LOGI("main", "💡 ESP32 can reach broker if both start with 10.60.x.x");
+                ESP_LOGI("main", "");
+                
+                ESP_LOGI("main", "⏰ Forcing NTP synchronization...");
+            - component.update: sntp_time
+            - delay: 3s
+            - wait_until:
+                condition:
+                  lambda: 'return id(sntp_time).now().is_valid();'
+                timeout: 30s
+            - if:
+                condition:
+                  lambda: 'return id(sntp_time).now().is_valid();'
+                then:
+                  - lambda: |-
+                      auto time = id(sntp_time).now();
+                      ESP_LOGI("main", "✅ NTP sync successful!");
+                      ESP_LOGI("main", "📅 Current time: %04d-%02d-%02d %02d:%02d:%02d WIB", 
+                               time.year, time.month, time.day_of_month, 
+                               time.hour, time.minute, time.second);
+                      ESP_LOGI("main", "🕐 Unix timestamp: %lu", (unsigned long)time.timestamp);
+                else:
+                  - logger.log: 
+                      format: "⚠️ NTP sync failed, will use millis() timestamp"
+                      level: WARN
+          else:
+            - logger.log: 
+                format: "⚠️ WiFi connection failed, will use millis() timestamp"
+                level: WARN
+      - delay: 2s
+      - lambda: |-
+          ESP_LOGI("main", "=== STM32 BIDIRECTIONAL COMMUNICATION CONFIG ===");
+          ESP_LOGI("main", "UART: GPIO17(TX), GPIO16(RX), 9600 baud");
+          ESP_LOGI("main", "ESP32 -> STM32 (13 fields):");
+          ESP_LOGI("main", "  timestamp,lux,temp1,temp2,voltage,current,soc,");
+          ESP_LOGI("main", "  bms_temp1,bms_temp2,v1,v2,v3,v4");
+          ESP_LOGI("main", "STM32 -> ESP32 (15 fields - OPTIMIZED):");
+          ESP_LOGI("main", "  PVVoltage,PVCurrent,PVPower,PVEnergy,");
+          ESP_LOGI("main", "  BattVoltage,BattCurrent,BattPower,BattEnergy,");
+          ESP_LOGI("main", "  INA219Voltage,INA219Current,ShuntVoltage,");
+          ESP_LOGI("main", "  PLTSPower,PLTSEnergy,GridPower,GridEnergy");
+          ESP_LOGI("main", "⚡ Fast-path realtime data (PZEM + INA219 only)");
+          ESP_LOGI("main", "📊 BMS data: ESP32->STM32->SD card logging");
+          ESP_LOGI("main", "Send interval: ESP->STM 60s, STM->ESP on PZEM read");
+          ESP_LOGI("main", "✅ System ready - Memory optimized dual-path arch");
+          ESP_LOGI("main", "===============================================");
+
+external_components:
+  - source: ${external_components_source}
+    refresh: 0s
+    
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+# WiFi configuration - WPA Personal (simple home WiFi)
+# WiFi configuration - WPA Personal (simple home WiFi)
+wifi:
+  ssid: "TUGASAKHIR22"
+  password: "TahunDepanCumlaude"
+  fast_connect: false
+  
+  # Power save mode off untuk stabilitas
+  power_save_mode: none
+  
+  # Reboot jika gagal koneksi dalam 5 menit
+  reboot_timeout: 5min
+  
+  # Tambahkan domain untuk improve DNS
+  domain: .local
+  
+  # Fallback hotspot jika gagal koneksi
+  ap:
+    ssid: "ESP32-Fallback-Hotspot"
+    password: "12345678"
+
+# mDNS component (moved from wifi section)
+mdns:
+  disabled: false
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+
+ble_client:
+  - mac_address: ${mac_address}
+    id: client0
+
+daly_bms_ble:
+  - ble_client_id: client0
+    id: bms0
+    password: 12345678
+    update_interval: 60s
+
+# Global variables untuk menyimpan data dari STM32
+globals:
+  - id: stm32_last_data_time
+    type: uint32_t
+    initial_value: '0'
+  - id: stm32_data_received_count
+    type: uint32_t
+    initial_value: '0'
+
+binary_sensor:
+  - platform: daly_bms_ble
+    daly_bms_ble_id: bms0
+    balancing:
+      name: "${name} balancing"
+    charging:
+      name: "${name} charging"
+    discharging:
+      name: "${name} discharging"
+
+  # WiFi connection status
+  - platform: template
+    name: "${name} WiFi Connected"
+    id: wifi_connected
+    lambda: |-
+      return id(wifi_rssi).state > -100;
+
+  # NTP sync status
+  - platform: template
+    name: "${name} NTP Synced"
+    id: ntp_synced
+    lambda: |-
+      auto time = id(sntp_time).now();
+      return time.is_valid();
+
+  # STM32 connection status
+  - platform: template
+    name: "${name} STM32 Connected"
+    id: stm32_connected
+    lambda: |-
+      // STM32 dianggap connected jika data diterima dalam 5 menit terakhir (STM32 kirim tiap 3 menit)
+      uint32_t current_time = millis();
+      uint32_t last_data = id(stm32_last_data_time);
+      
+      if (last_data == 0) {
+        return false; // Belum pernah terima data
+      }
+      
+      return (current_time - last_data) < 300000; // 5 menit timeout
+
+button:
+  - platform: daly_bms_ble
+    retrieve_settings:
+      name: "${name} retrieve settings"
+    restart:
+      name: "${name} restart"
+    shutdown:
+      name: "${name} shutdown"
+    factory_reset:
+      name: "${name} factory reset"
+    reset_current:
+      name: "${name} reset current"
+
+switch:
+  - platform: daly_bms_ble
+    balancer:
+      name: "${name} balancer"
+    charging:
+      name: "${name} charging"
+    discharging:
+      name: "${name} discharging"
+
+  - platform: ble_client
+    ble_client_id: client0
+    id: ble_client_switch0
+    name: "${name} enable bluetooth connection"
+  
+  # === REMOTE RELAY CONTROL VIA STM32 ===
+  - platform: template
+    name: "${name} STM32 Relay Inverter"
+    id: stm32_relay_inv
+    optimistic: false
+    turn_on_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_INV_ON\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_INV_ON");
+    turn_off_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_INV_OFF\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_INV_OFF");
+  
+  - platform: template
+    name: "${name} STM32 Relay Battery"
+    id: stm32_relay_batt
+    optimistic: false
+    turn_on_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_BATT_ON\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_BATT_ON");
+    turn_off_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_BATT_OFF\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_BATT_OFF");
+  
+  - platform: template
+    name: "${name} STM32 Relay ATS Normal"
+    id: stm32_relay_ats_n
+    optimistic: false
+    turn_on_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_ATS_N_ON\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_N_ON");
+    turn_off_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_ATS_N_OFF\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_N_OFF");
+  
+  - platform: template
+    name: "${name} STM32 Relay ATS Fail"
+    id: stm32_relay_ats_f
+    optimistic: false
+    turn_on_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_ATS_F_ON\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_F_ON");
+    turn_off_action:
+      - lambda: |-
+          id(stm32_uart).write_str("RELAY_ATS_F_OFF\n");
+          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_F_OFF");
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: false  # Matikan scan untuk hindari crash jika LCD tidak terpasang
+  id: bus_a
+  frequency: 100kHz  # Gunakan frequency rendah untuk stabilitas
+
+display:
+  - platform: lcd_pcf8574
+    dimensions: 20x4
+    address: 0x27
+    i2c_id: bus_a
+    id: lcd_display
+    update_interval: 60s
+    lambda: |-
+      static int display_count = 0;
+      display_count++;
+      
+      // Line 1: Header with status dan count
+      bool wifi_ok = id(wifi_rssi).state > -100;
+      bool ntp_ok = id(ntp_synced).state;
+      bool stm32_ok = id(stm32_connected).state;
+      
+      it.printf(0, 0, "ESP32 #%d %s%s%s", 
+                display_count,
+                wifi_ok ? "W" : "w",
+                ntp_ok ? "T" : "t",
+                stm32_ok ? "S" : "s");
+      
+      // Line 2: BMS Data + STM32 PZEM Panel Energy
+      it.printf(0, 1, "BMS:%.1fV PV:%.0fWh", id(total_voltage).state, id(stm32_pv_energy).state);
+      
+      // Line 3: Environmental + STM32 Battery Energy
+      it.printf(0, 2, "Lx:%.0f Bat:%.0fWh", id(veml7700_lux).state, id(stm32_batt_energy).state);
+      
+      // Line 4: Temperature + INA219 Shunt + Time
+      auto time = id(sntp_time).now();
+      if (time.is_valid()) {
+        it.printf(0, 3, "T:%.1f Sh:%.1fmV %02d:%02d", id(ds_temp1).state, id(stm32_shunt_voltage).state, time.hour, time.minute);
+      } else {
+        uint32_t uptime = millis() / 1000;
+        uint32_t minutes = uptime / 60;
+        it.printf(0, 3, "T:%.1f Sh:%.1fmV %lum", id(ds_temp1).state, id(stm32_shunt_voltage).state, minutes);
+      }
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+    id: ow_bus_1
+  - platform: gpio
+    pin: GPIO5
+    id: ow_bus_2
+
+sensor:
+  - platform: daly_bms_ble
+    daly_bms_ble_id: bms0
+    error_bitmask:
+      name: "${name} error bitmask"
+    total_voltage:
+      name: "${name} total voltage"
+      id: total_voltage
+    current:
+      name: "${name} current"
+      id: total_current
+    power:
+      name: "${name} power"
+      id: Power
+    charging_power:
+      name: "${name} charging power"
+    discharging_power:
+      name: "${name} discharging power"
+    state_of_charge:
+      name: "${name} state of charge"
+      id: soc
+    charging_cycles:
+      name: "${name} charging cycles"
+    temperature_1:
+      name: "${name} temperature 1"
+      id: temp_sensor1
+    temperature_2:
+      name: "${name} temperature 2"
+      id: temp_sensor2
+    cell_voltage_1:
+      name: "${name} cell voltage 1"
+      id: v1
+    cell_voltage_2:
+      name: "${name} cell voltage 2"
+      id: v2
+    cell_voltage_3:
+      name: "${name} cell voltage 3"
+      id: v3
+    cell_voltage_4:
+      name: "${name} cell voltage 4"
+      id: v4
+      
+  - platform: veml7700
+    address: 0x10
+    update_interval: 60s
+    gain: 1X
+    integration_time: 100ms
+    ambient_light:
+      name: "Ambient Light"
+      id: veml7700_lux
+      unit_of_measurement: "lx"
+      accuracy_decimals: 1
+      filters:
+        - lambda: |-
+            if (isnan(x)) {
+              ESP_LOGW("veml7700", "Failed to read sensor data");
+              return 0.0;
+            }
+            return x;
+      on_value:
+        then:
+          - mqtt.publish:
+              topic: fixgoal2/sensor/fixgoal2_ambient_light/state
+              payload: !lambda |-
+                return to_string(x);
+
+  - platform: dallas_temp
+    name: "Temperature Sensor 1"
+    update_interval: 60s
+    one_wire_id: ow_bus_1
+    id: ds_temp1
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    filters:
+      - lambda: |-
+          if (isnan(x) || x == -127.0) {
+            ESP_LOGW("ds18b20_1", "Sensor disconnected or error");
+            return 0.0;
+          }
+          return x;
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: fixgoal2/sensor/fixgoal2_temperature_sensor_1/state
+            payload: !lambda |-
+              return to_string(x);
+
+  - platform: dallas_temp
+    name: "Temperature Sensor 2"
+    update_interval: 60s
+    one_wire_id: ow_bus_2
+    id: ds_temp2
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    filters:
+      - lambda: |-
+          if (isnan(x) || x == -127.0) {
+            ESP_LOGW("ds18b20_2", "Sensor disconnected or error");
+            return 0.0;
+          }
+          return x;
+
+  # WiFi Signal Strength
+  - platform: wifi_signal
+    name: "${name} WiFi Signal"
+    id: wifi_rssi
+    update_interval: 60s
+
+  # === SENSOR DATA DARI STM32 (11 field - UPDATE) ===
+  # PZEM Panel (Solar) dari STM32
+  - platform: template
+    name: "${name} STM32 PV Voltage"
+    id: stm32_pv_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 PV Current"
+    id: stm32_pv_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    device_class: current
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 PV Power"
+    id: stm32_pv_power
+    unit_of_measurement: "W"
+    accuracy_decimals: 1
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 PV Energy"
+    id: stm32_pv_energy
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  # PZEM Battery dari STM32
+  - platform: template
+    name: "${name} STM32 Battery Voltage"
+    id: stm32_batt_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 Battery Current"
+    id: stm32_batt_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    device_class: current
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 Battery Power"
+    id: stm32_batt_power
+    unit_of_measurement: "W"
+    accuracy_decimals: 1
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 Battery Energy"
+    id: stm32_batt_energy
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  # INA219 dari STM32
+  - platform: template
+    name: "${name} STM32 INA219 Voltage"
+    id: stm32_ina_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 INA219 Current"
+    id: stm32_ina_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 3
+    device_class: current
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 Shunt Voltage"
+    id: stm32_shunt_voltage
+    unit_of_measurement: "mV"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+
+  # === LOAD MONITORING SENSORS (PLTS & Grid) ===
+  - platform: template
+    name: "${name} STM32 PLTS Power"
+    id: stm32_plts_power
+    unit_of_measurement: "W"
+    accuracy_decimals: 1
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 PLTS Energy"
+    id: stm32_plts_energy
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: template
+    name: "${name} STM32 Grid Power"
+    id: stm32_grid_power
+    unit_of_measurement: "W"
+    accuracy_decimals: 1
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    name: "${name} STM32 Grid Energy"
+    id: stm32_grid_energy
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  # Data reception statistics
+  - platform: template
+    name: "${name} STM32 Data Count"
+    id: stm32_data_count
+    unit_of_measurement: "packets"
+    accuracy_decimals: 0
+    state_class: total_increasing
+    lambda: |-
+      return id(stm32_data_received_count);
+
+text_sensor:
+  - platform: daly_bms_ble
+    daly_bms_ble_id: bms0
+    battery_status:
+      name: "${name} battery status"
+    errors:
+      name: "${name} errors"
+
+  # STM32 Connection Status
+  - platform: template
+    name: "${name} STM32 Status"
+    id: stm32_status
+    update_interval: 10s
+    lambda: |-
+      uint32_t current_time = millis();
+      uint32_t last_data = id(stm32_last_data_time);
+      
+      if (last_data == 0) {
+        return std::string("NO_DATA");
+      }
+      
+      uint32_t time_since_last = (current_time - last_data) / 1000;
+      
+      if (time_since_last < 180) {
+        return std::string("ONLINE");
+      } else if (time_since_last < 300) {
+        return std::string("TIMEOUT");
+      } else {
+        return std::string("OFFLINE");
+      }
+
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - "pool.ntp.org"
+      - "time.google.com"
+      - "id.pool.ntp.org"
+    timezone: "Asia/Jakarta"  # WIB (GMT+7)
+    update_interval: 3600s  # Update every hour
+    on_time_sync:
+      then:
+        - lambda: |-
+            auto time = id(sntp_time).now();
+            ESP_LOGI("ntp", "✅ NTP time synchronized successfully");
+            ESP_LOGI("ntp", "📅 Current time: %04d-%02d-%02d %02d:%02d:%02d WIB", 
+                     time.year, time.month, time.day_of_month, 
+                     time.hour, time.minute, time.second);
+            ESP_LOGI("ntp", "🕐 Unix timestamp: %lu", (unsigned long)time.timestamp);
+    on_time:
+      # Force sync every 6 hours to maintain accuracy
+      - hours: 6
+        then:
+          - logger.log: "⏰ Periodic NTP sync (6 hour interval)"
+          - component.update: sntp_time
+
+# UART Configuration for bidirectional STM32 communication
+uart:
+  id: stm32_uart
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+  debug:
+    direction: BOTH
+    dummy_receiver: false
+
+interval:
+  # Interval khusus untuk timestamp sync (prioritas tinggi)
+  - interval: 30s
+    then:
+      - lambda: |-
+          static int sync_count = 0;
+          static uint32_t last_sent_timestamp = 0;
+          sync_count++;
+          
+          // Get timestamp dengan prioritas NTP
+          auto time = id(sntp_time).now();
+          uint32_t timestamp;
+          bool using_ntp = false;
+          bool is_fresh = false;
+          
+          if (time.is_valid()) {
+            timestamp = time.timestamp;
+            using_ntp = true;
+            
+            // Check apakah timestamp baru (fresh)
+            if (timestamp != last_sent_timestamp) {
+              last_sent_timestamp = timestamp;
+              is_fresh = true;
+            }
+          } else {
+            timestamp = millis() / 1000;
+            using_ntp = false;
+          }
+          
+          // Format khusus untuk timestamp sync: TIMESTAMP_SYNC,timestamp,status
+          char sync_buffer[80];
+          snprintf(sync_buffer, sizeof(sync_buffer), "TIMESTAMP_SYNC,%lu,%s", 
+                   (unsigned long)timestamp, using_ntp ? "NTP" : "MILLIS");
+          
+          // Send timestamp sync ke STM32
+          id(stm32_uart).write_str(sync_buffer);
+          id(stm32_uart).write_str("\n");
+          
+          // Log timestamp sync
+          ESP_LOGI("timestamp_sync", "⏰ Sync #%d: %s", sync_count, sync_buffer);
+          
+          if (is_fresh && using_ntp) {
+            ESP_LOGI("timestamp_sync", "🆕 Fresh NTP timestamp sent: %lu", (unsigned long)timestamp);
+            ESP_LOGI("timestamp_sync", "📅 Time: %04d-%02d-%02d %02d:%02d:%02d WIB", 
+                     time.year, time.month, time.day_of_month, time.hour, time.minute, time.second);
+          }
+
+  # Interval untuk data sensor lengkap (60 detik = 1 menit)
+  - interval: 60s
+    then:
+      - lambda: |-
+          static int data_count = 0;
+          data_count++;
+          
+          // Get 13 sensor values: timestamp,lux,temp1,temp2,voltage,current,soc,bms_temp1,bms_temp2,v1,v2,v3,v4
+          float lux = id(veml7700_lux).state;
+          float temp1 = id(ds_temp1).state;
+          float temp2 = id(ds_temp2).state;
+          float voltage = id(total_voltage).state;  // BMS Total Voltage
+          float current = id(total_current).state;  // BMS Current
+          float soc_val = id(soc).state;           // BMS State of Charge
+          float bms_temp1 = id(temp_sensor1).state; // BMS Temperature 1
+          float bms_temp2 = id(temp_sensor2).state; // BMS Temperature 2
+          float cell_v1 = id(v1).state;            // Cell Voltage 1
+          float cell_v2 = id(v2).state;            // Cell Voltage 2
+          float cell_v3 = id(v3).state;            // Cell Voltage 3
+          float cell_v4 = id(v4).state;            // Cell Voltage 4
+          
+          // Get STM32 sensor values
+          float pv_voltage = id(stm32_pv_voltage).state;
+          float pv_current = id(stm32_pv_current).state;
+          float pv_power = id(stm32_pv_power).state;
+          float pv_energy = id(stm32_pv_energy).state;
+          float batt_voltage = id(stm32_batt_voltage).state;
+          float batt_current = id(stm32_batt_current).state;
+          float batt_power = id(stm32_batt_power).state;
+          float batt_energy = id(stm32_batt_energy).state;
+          float ina_voltage = id(stm32_ina_voltage).state;
+          float ina_current = id(stm32_ina_current).state;
+          float shunt_voltage = id(stm32_shunt_voltage).state;
+          
+          // Get WiFi signal
+          float wifi_rssi_val = id(wifi_rssi).state;
+          
+          // Validate ESP32 sensor data
+          if (isnan(lux)) lux = 0.0;
+          if (isnan(temp1)) temp1 = 0.0;
+          if (isnan(temp2)) temp2 = 0.0;
+          if (isnan(voltage)) voltage = 0.0;
+          if (isnan(current)) current = 0.0;
+          if (isnan(soc_val)) soc_val = 0.0;
+          if (isnan(bms_temp1)) bms_temp1 = 0.0;
+          if (isnan(bms_temp2)) bms_temp2 = 0.0;
+          if (isnan(cell_v1)) cell_v1 = 0.0;
+          if (isnan(cell_v2)) cell_v2 = 0.0;
+          if (isnan(cell_v3)) cell_v3 = 0.0;
+          if (isnan(cell_v4)) cell_v4 = 0.0;
+          
+          // Validate STM32 sensor data
+          if (isnan(pv_voltage)) pv_voltage = 0.0;
+          if (isnan(pv_current)) pv_current = 0.0;
+          if (isnan(pv_power)) pv_power = 0.0;
+          if (isnan(pv_energy)) pv_energy = 0.0;
+          if (isnan(batt_voltage)) batt_voltage = 0.0;
+          if (isnan(batt_current)) batt_current = 0.0;
+          if (isnan(batt_power)) batt_power = 0.0;
+          if (isnan(batt_energy)) batt_energy = 0.0;
+          if (isnan(ina_voltage)) ina_voltage = 0.0;
+          if (isnan(ina_current)) ina_current = 0.0;
+          if (isnan(shunt_voltage)) shunt_voltage = 0.0;
+          if (isnan(wifi_rssi_val)) wifi_rssi_val = -100.0;
+          
+          // Get timestamp untuk data sensor
+          auto time = id(sntp_time).now();
+          uint32_t timestamp;
+          bool using_ntp = false;
+          
+          if (time.is_valid()) {
+            timestamp = time.timestamp;
+            using_ntp = true;
+          } else {
+            timestamp = millis() / 1000;
+            using_ntp = false;
+          }
+          
+          // Format data CSV 13 field: timestamp,lux,temp1,temp2,voltage,current,soc,bms_temp1,bms_temp2,v1,v2,v3,v4
+          char data_buffer[200];
+          snprintf(data_buffer, sizeof(data_buffer), "%lu,%.1f,%.1f,%.1f,%.2f,%.2f,%.1f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f", 
+                   (unsigned long)timestamp, lux, temp1, temp2, voltage, current, soc_val,
+                   bms_temp1, bms_temp2, cell_v1, cell_v2, cell_v3, cell_v4);
+          
+          // Send data sensor ke STM32
+          id(stm32_uart).write_str(data_buffer);
+          id(stm32_uart).write_str("\n");
+          
+          // Connection status
+          bool wifi_ok = wifi_rssi_val > -100;
+          bool ntp_ok = id(ntp_synced).state;
+          bool stm32_ok = id(stm32_connected).state;
+          
+          // ========================================
+          // COMPREHENSIVE MQTT-READY DATA LOG
+          // Complete snapshot for realtime monitoring
+          // ========================================
+          ESP_LOGI("mqtt_data", "");
+          ESP_LOGI("mqtt_data", "╔═══════════════════════════════════════════════════════════╗");
+          ESP_LOGI("mqtt_data", "║  REALTIME MONITORING DATA - MQTT READY (#%d)", data_count);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // Timestamp & System Status
+          if (using_ntp) {
+            ESP_LOGI("mqtt_data", "║ ⏰ Timestamp: %lu (%04d-%02d-%02d %02d:%02d:%02d WIB)", 
+                     (unsigned long)timestamp, time.year, time.month, time.day_of_month,
+                     time.hour, time.minute, time.second);
+          } else {
+            ESP_LOGI("mqtt_data", "║ ⏰ Timestamp: %lu (millis-based)", (unsigned long)timestamp);
+          }
+          ESP_LOGI("mqtt_data", "║ 📶 WiFi: %s (RSSI: %.0f dBm)", wifi_ok ? "✅ CONNECTED" : "❌ DISCONNECTED", wifi_rssi_val);
+          ESP_LOGI("mqtt_data", "║ 🕐 NTP:  %s", ntp_ok ? "✅ SYNCED" : "⚠️  NOT SYNCED");
+          ESP_LOGI("mqtt_data", "║ 🔗 STM32: %s", stm32_ok ? "✅ CONNECTED" : "❌ DISCONNECTED");
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // Environmental Sensors (ESP32 Direct)
+          ESP_LOGI("mqtt_data", "║ 🌞 ENVIRONMENTAL SENSORS");
+          ESP_LOGI("mqtt_data", "║   • Lux (VEML7700):    %.1f lx", lux);
+          ESP_LOGI("mqtt_data", "║   • Temp 1 (DS18B20):  %.1f °C", temp1);
+          ESP_LOGI("mqtt_data", "║   • Temp 2 (DS18B20):  %.1f °C", temp2);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // BMS Data (Daly BMS via BLE)
+          ESP_LOGI("mqtt_data", "║ 🔋 BATTERY MANAGEMENT SYSTEM (BMS)");
+          ESP_LOGI("mqtt_data", "║   • Total Voltage:     %.2f V", voltage);
+          ESP_LOGI("mqtt_data", "║   • Current:           %.2f A", current);
+          ESP_LOGI("mqtt_data", "║   • Power:             %.1f W", voltage * current);
+          ESP_LOGI("mqtt_data", "║   • State of Charge:   %.1f %%", soc_val);
+          ESP_LOGI("mqtt_data", "║   • BMS Temp 1:        %.1f °C", bms_temp1);
+          ESP_LOGI("mqtt_data", "║   • BMS Temp 2:        %.1f °C", bms_temp2);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // Cell Voltages
+          ESP_LOGI("mqtt_data", "║ 🔬 INDIVIDUAL CELL VOLTAGES");
+          ESP_LOGI("mqtt_data", "║   • Cell 1:            %.3f V", cell_v1);
+          ESP_LOGI("mqtt_data", "║   • Cell 2:            %.3f V", cell_v2);
+          ESP_LOGI("mqtt_data", "║   • Cell 3:            %.3f V", cell_v3);
+          ESP_LOGI("mqtt_data", "║   • Cell 4:            %.3f V", cell_v4);
+          float cell_avg = (cell_v1 + cell_v2 + cell_v3 + cell_v4) / 4.0;
+          float cell_max = max(max(cell_v1, cell_v2), max(cell_v3, cell_v4));
+          float cell_min = min(min(cell_v1, cell_v2), min(cell_v3, cell_v4));
+          ESP_LOGI("mqtt_data", "║   • Average:           %.3f V", cell_avg);
+          ESP_LOGI("mqtt_data", "║   • Delta (max-min):   %.3f V", cell_max - cell_min);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // PZEM Panel (Solar) from STM32
+          ESP_LOGI("mqtt_data", "║ ⚡ SOLAR PANEL (PZEM - from STM32)");
+          ESP_LOGI("mqtt_data", "║   • Voltage:           %.2f V", pv_voltage);
+          ESP_LOGI("mqtt_data", "║   • Current:           %.2f A", pv_current);
+          ESP_LOGI("mqtt_data", "║   • Power:             %.1f W", pv_power);
+          ESP_LOGI("mqtt_data", "║   • Energy (24h):      %.0f Wh", pv_energy);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // PZEM Battery from STM32
+          ESP_LOGI("mqtt_data", "║ 🔌 BATTERY PZEM (from STM32)");
+          ESP_LOGI("mqtt_data", "║   • Voltage:           %.2f V", batt_voltage);
+          ESP_LOGI("mqtt_data", "║   • Current:           %.2f A", batt_current);
+          ESP_LOGI("mqtt_data", "║   • Power:             %.1f W", batt_power);
+          ESP_LOGI("mqtt_data", "║   • Energy (24h):      %.0f Wh", batt_energy);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // INA219 Load Monitoring from STM32
+          ESP_LOGI("mqtt_data", "║ 🏠 LOAD MONITORING (INA219 - from STM32)");
+          ESP_LOGI("mqtt_data", "║   • Bus Voltage:       %.2f V", ina_voltage);
+          ESP_LOGI("mqtt_data", "║   • Current:           %.3f A", ina_current);
+          ESP_LOGI("mqtt_data", "║   • Power:             %.1f W", ina_voltage * ina_current);
+          ESP_LOGI("mqtt_data", "║   • Shunt Voltage:     %.2f mV", shunt_voltage);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // Energy Summary
+          ESP_LOGI("mqtt_data", "║ 📊 ENERGY SUMMARY (24-hour counters)");
+          ESP_LOGI("mqtt_data", "║   • Solar Generated:   %.0f Wh", pv_energy);
+          ESP_LOGI("mqtt_data", "║   • Battery Flow:      %.0f Wh", batt_energy);
+          float total_energy = pv_energy + batt_energy;
+          ESP_LOGI("mqtt_data", "║   • Total Energy:      %.0f Wh", total_energy);
+          ESP_LOGI("mqtt_data", "╠═══════════════════════════════════════════════════════════╣");
+          
+          // Data Transmission Info
+          ESP_LOGI("mqtt_data", "║ 📤 DATA TRANSMISSION");
+          ESP_LOGI("mqtt_data", "║   ESP32->STM32: %s", data_buffer);
+          ESP_LOGI("mqtt_data", "║   STM32 packets: %lu received", id(stm32_data_received_count));
+          ESP_LOGI("mqtt_data", "╚═══════════════════════════════════════════════════════════╝");
+          ESP_LOGI("mqtt_data", "");
+
+  # Interval untuk monitoring koneksi STM32
+  - interval: 300s  # Setiap 5 menit
+    then:
+      - lambda: |-
+          uint32_t current_time = millis();
+          uint32_t last_data = id(stm32_last_data_time);
+          uint32_t data_count = id(stm32_data_received_count);
+          
+          ESP_LOGI("stm32_monitor", "📊 STM32 Connection Monitor:");
+          ESP_LOGI("stm32_monitor", "   🔢 Total packets received: %lu", data_count);
+          
+          if (last_data == 0) {
+            ESP_LOGI("stm32_monitor", "   ⚠️  No data received from STM32 yet");
+          } else {
+            uint32_t time_since_last = (current_time - last_data) / 1000;
+            ESP_LOGI("stm32_monitor", "   ⏱️  Last data: %lu seconds ago", time_since_last);
+            
+            if (time_since_last < 180) {
+              ESP_LOGI("stm32_monitor", "   ✅ STM32 connection: ONLINE");
+            } else if (time_since_last < 300) {
+              ESP_LOGW("stm32_monitor", "   ⚠️  STM32 connection: TIMEOUT");
+            } else {
+              ESP_LOGE("stm32_monitor", "   ❌ STM32 connection: OFFLINE");
+            }
+          }
+
+  # Interval untuk membaca data dari STM32 via UART (UPDATE - support 15 field)
+  - interval: 1s  # Cek setiap 1 detik untuk responsif
+    then:
+      - lambda: |-
+          // Baca data dari UART (non-blocking)
+          static std::string received_data = "";
+          
+          while (id(stm32_uart).available()) {
+            uint8_t c;
+            id(stm32_uart).read_byte(&c);
+            
+            if (c == '\n' || c == '\r') {
+              if (!received_data.empty()) {
+                // Process complete line
+                ESP_LOGI("uart_rx", "📥 STM->ESP Raw: %s", received_data.c_str());
+                
+                // Update timestamp penerimaan data
+                id(stm32_last_data_time) = millis();
+                id(stm32_data_received_count)++;
+                
+                // Parse data CSV manual
+                std::vector<float> values;
+                size_t pos = 0;
+                size_t last_pos = 0;
+                
+                // Manual CSV parsing
+                while ((pos = received_data.find(',', last_pos)) != std::string::npos) {
+                  std::string item = received_data.substr(last_pos, pos - last_pos);
+                  values.push_back(atof(item.c_str()));
+                  last_pos = pos + 1;
+                }
+                // Add last item
+                std::string last_item = received_data.substr(last_pos);
+                values.push_back(atof(last_item.c_str()));
+                
+                // Validasi jumlah field (support 11 atau 15 field)
+                if (values.size() == 15) {
+                  // Format baru 15 field:
+                  // PZEMVoltagePanel,PZEMCurrentPanel,PZEMPowerPanel,PZEMEnergyPanel,
+                  // PZEMVoltageBattery,PZEMCurrentBattery,PZEMPowerBattery,PZEMEnergyBattery,
+                  // INA219Voltage,INA219Current,ShuntVoltage,
+                  // PLTSPower,PLTSEnergy,GridPower,GridEnergy
+                  float pv_voltage = values[0];
+                  float pv_current = values[1];
+                  float pv_power = values[2];
+                  float pv_energy = values[3];
+                  float batt_voltage = values[4];
+                  float batt_current = values[5];
+                  float batt_power = values[6];
+                  float batt_energy = values[7];
+                  float ina_voltage = values[8];
+                  float ina_current = values[9];
+                  float shunt_voltage = values[10];
+                  float plts_power = values[11];
+                  float plts_energy = values[12];
+                  float grid_power = values[13];
+                  float grid_energy = values[14];
+                  
+                  // Validate values are reasonable
+                  if (!isnan(pv_voltage) && !isnan(pv_current) && !isnan(pv_power) && !isnan(pv_energy) &&
+                      !isnan(batt_voltage) && !isnan(batt_current) && !isnan(batt_power) && !isnan(batt_energy) &&
+                      !isnan(ina_voltage) && !isnan(ina_current) && !isnan(shunt_voltage) &&
+                      !isnan(plts_power) && !isnan(plts_energy) && !isnan(grid_power) && !isnan(grid_energy)) {
+                    
+                    // Update template sensors
+                    id(stm32_pv_voltage).publish_state(pv_voltage);
+                    id(stm32_pv_current).publish_state(pv_current);
+                    id(stm32_pv_power).publish_state(pv_power);
+                    id(stm32_pv_energy).publish_state(pv_energy);
+                    id(stm32_batt_voltage).publish_state(batt_voltage);
+                    id(stm32_batt_current).publish_state(batt_current);
+                    id(stm32_batt_power).publish_state(batt_power);
+                    id(stm32_batt_energy).publish_state(batt_energy);
+                    id(stm32_ina_voltage).publish_state(ina_voltage);
+                    id(stm32_ina_current).publish_state(ina_current);
+                    id(stm32_shunt_voltage).publish_state(shunt_voltage);
+                    id(stm32_plts_power).publish_state(plts_power);
+                    id(stm32_plts_energy).publish_state(plts_energy);
+                    id(stm32_grid_power).publish_state(grid_power);
+                    id(stm32_grid_energy).publish_state(grid_energy);
+                    
+                    // Update data count
+                    id(stm32_data_count).publish_state(id(stm32_data_received_count));
+                    
+                    ESP_LOGI("stm32_data", "✅ STM32 Data parsed successfully (15 fields):");
+                    ESP_LOGI("stm32_data", "   ⚡ PZEM Panel: %.2fV %.2fA %.1fW %.0fWh", pv_voltage, pv_current, pv_power, pv_energy);
+                    ESP_LOGI("stm32_data", "   🔋 PZEM Battery: %.2fV %.2fA %.1fW %.0fWh", batt_voltage, batt_current, batt_power, batt_energy);
+                    ESP_LOGI("stm32_data", "   🔌 INA219: %.2fV %.3fA | Shunt: %.2fmV", ina_voltage, ina_current, shunt_voltage);
+                    ESP_LOGI("stm32_data", "   🏠 PLTS Load: %.1fW %.0fWh | Grid: %.1fW %.0fWh", plts_power, plts_energy, grid_power, grid_energy);
+                  } else {
+                    ESP_LOGW("stm32_data", "❌ Invalid sensor values detected (NaN)");
+                  }
+                }
+                else if (values.size() == 11) {
+                  // Support backward compatibility untuk 11 fieldEMPowerBattery,PZEMEnergyBattery,
+                  // INA219Voltage,INA219Current,ShuntVoltage
+                  float pv_voltage = values[0];
+                  float pv_current = values[1];
+                  float pv_power = values[2];
+                  float pv_energy = values[3];
+                  float batt_voltage = values[4];
+                  float batt_current = values[5];
+                  float batt_power = values[6];
+                  float batt_energy = values[7];
+                  float ina_voltage = values[8];
+                  float ina_current = values[9];
+                  float shunt_voltage = values[10];
+                  
+                  // Validate values are reasonable
+                  if (!isnan(pv_voltage) && !isnan(pv_current) && !isnan(pv_power) && !isnan(pv_energy) &&
+                      !isnan(batt_voltage) && !isnan(batt_current) && !isnan(batt_power) && !isnan(batt_energy) &&
+                      !isnan(ina_voltage) && !isnan(ina_current) && !isnan(shunt_voltage)) {
+                    
+                    // Update template sensors
+                    id(stm32_pv_voltage).publish_state(pv_voltage);
+                    id(stm32_pv_current).publish_state(pv_current);
+                    id(stm32_pv_power).publish_state(pv_power);
+                    id(stm32_pv_energy).publish_state(pv_energy);
+                    id(stm32_batt_voltage).publish_state(batt_voltage);
+                    id(stm32_batt_current).publish_state(batt_current);
+                    id(stm32_batt_power).publish_state(batt_power);
+                    id(stm32_batt_energy).publish_state(batt_energy);
+                    id(stm32_ina_voltage).publish_state(ina_voltage);
+                    id(stm32_ina_current).publish_state(ina_current);
+                    id(stm32_shunt_voltage).publish_state(shunt_voltage);
+                    
+                    // Update data count
+                    id(stm32_data_count).publish_state(id(stm32_data_received_count));
+                    
+                    ESP_LOGI("stm32_data", "✅ STM32 Data parsed successfully (11 fields):");
+                    ESP_LOGI("stm32_data", "   ⚡ PZEM Panel: %.2fV %.2fA %.1fW %.0fWh", pv_voltage, pv_current, pv_power, pv_energy);
+                    ESP_LOGI("stm32_data", "   🔋 PZEM Battery: %.2fV %.2fA %.1fW %.0fWh", batt_voltage, batt_current, batt_power, batt_energy);
+                    ESP_LOGI("stm32_data", "   🔌 INA219: %.2fV %.3fA | Shunt: %.2fmV", ina_voltage, ina_current, shunt_voltage);
+                  } else {
+                    ESP_LOGW("stm32_data", "❌ Invalid sensor values detected (NaN)");
+                  }
+                }
+                // Handle relay status feedback
+                else if (received_data.find("RELAY_INV_STATUS:") == 0) {
+                  std::string status = received_data.substr(17);
+                  bool isOn = (status == "ON");
+                  id(stm32_relay_inv).publish_state(isOn);
+                  ESP_LOGI("relay", "✅ Inverter relay status updated: %s", isOn ? "ON" : "OFF");
+                }
+                else if (received_data.find("RELAY_BATT_STATUS:") == 0) {
+                  std::string status = received_data.substr(18);
+                  bool isOn = (status == "ON");
+                  id(stm32_relay_batt).publish_state(isOn);
+                  ESP_LOGI("relay", "✅ Battery relay status updated: %s", isOn ? "ON" : "OFF");
+                }
+                else if (received_data.find("RELAY_ATS_N_STATUS:") == 0) {
+                  std::string status = received_data.substr(19);
+                  bool isOn = (status == "ON");
+                  id(stm32_relay_ats_n).publish_state(isOn);
+                  ESP_LOGI("relay", "✅ ATS Normal relay status updated: %s", isOn ? "ON" : "OFF");
+                }
+                else if (received_data.find("RELAY_ATS_F_STATUS:") == 0) {
+                  std::string status = received_data.substr(19);
+                  bool isOn = (status == "ON");
+                  id(stm32_relay_ats_f).publish_state(isOn);
+                  ESP_LOGI("relay", "✅ ATS Fail relay status updated: %s", isOn ? "ON" : "OFF");
+                } 
+                // Backward compatibility: 8 field format (old)
+                else if (values.size() == 8) {
+                  // Format lama 8 field:
+                  // pv_voltage,pv_current,pv_power,batt_voltage,batt_current,batt_power,ina_voltage,ina_current
+                  float pv_voltage = values[0];
+                  float pv_current = values[1];
+                  float pv_power = values[2];
+                  float batt_voltage = values[3];
+                  float batt_current = values[4];
+                  float batt_power = values[5];
+                  float ina_voltage = values[6];
+                  float ina_current = values[7];
+                  
+                  // Validate values
+                  if (!isnan(pv_voltage) && !isnan(pv_current) && !isnan(pv_power) &&
+                      !isnan(batt_voltage) && !isnan(batt_current) && !isnan(batt_power) &&
+                      !isnan(ina_voltage) && !isnan(ina_current)) {
+                    
+                    // Update sensors (energy dan shunt voltage set 0)
+                    id(stm32_pv_voltage).publish_state(pv_voltage);
+                    id(stm32_pv_current).publish_state(pv_current);
+                    id(stm32_pv_power).publish_state(pv_power);
+                    id(stm32_pv_energy).publish_state(0.0);
+                    id(stm32_batt_voltage).publish_state(batt_voltage);
+                    id(stm32_batt_current).publish_state(batt_current);
+                    id(stm32_batt_power).publish_state(batt_power);
+                    id(stm32_batt_energy).publish_state(0.0);
+                    id(stm32_ina_voltage).publish_state(ina_voltage);
+                    id(stm32_ina_current).publish_state(ina_current);
+                    id(stm32_shunt_voltage).publish_state(0.0);
+                    
+                    id(stm32_data_count).publish_state(id(stm32_data_received_count));
+                    
+                    ESP_LOGI("stm32_data", "✅ STM32 Data parsed (8 fields - backward compatibility):");
+                    ESP_LOGI("stm32_data", "   ⚡ PZEM Panel: %.2fV %.2fA %.1fW", pv_voltage, pv_current, pv_power);
+                    ESP_LOGI("stm32_data", "   🔋 PZEM Battery: %.2fV %.2fA %.1fW", batt_voltage, batt_current, batt_power);
+                    ESP_LOGI("stm32_data", "   🔌 INA219: %.2fV %.3fA", ina_voltage, ina_current);
+                  } else {
+                    ESP_LOGW("stm32_data", "❌ Invalid sensor values detected");
+                  }
+                } 
+                else {
+                  ESP_LOGW("stm32_data", "❌ Invalid STM32 data format. Expected 11 or 8 fields, got %d", values.size());
+                  ESP_LOGW("stm32_data", "   New format (11): PVVoltage,PVCurrent,PVPower,PVEnergy,BattVoltage,BattCurrent,BattPower,BattEnergy,INA219Voltage,INA219Current,ShuntVoltage");
+                  ESP_LOGW("stm32_data", "   Old format (8): pv_voltage,pv_current,pv_power,batt_voltage,batt_current,batt_power,ina_voltage,ina_current");
+                }
+                
+                // Clear buffer
+                received_data.clear();
+              }
+            } else {
+              received_data += (char)c;
+            }
+          }
+api:
+
+
+# MQTT Configuration for Web Live Monitoring (HiveMQ Cloud)
+mqtt:
+  broker: "72.61.208.25"  # ← Ganti dengan IP VPS Anda
+  port: 1883
+  username: "bimantara"
+  password: "Bimantara1"
+  client_id: ${name}
+  discovery: false
+  topic_prefix: fixgoal2
+  keepalive: 60s
+  
+  birth_message:
+    topic: ${name}/status
+    payload: online
+  
+  will_message:
+    topic: ${name}/status
+    payload: offline
+  
+  on_connect:
+    - lambda: |-
+        ESP_LOGI("mqtt", "✅ Connected to VPS MQTT Broker");
+  
+  on_disconnect:
+    - lambda: |-
+        ESP_LOGW("mqtt", "⚠️ Disconnected from VPS MQTT Broker");
+
+ota:
+  platform: esphome
