@@ -602,6 +602,51 @@ void postTransmission() {
   digitalWrite(MAX485_DE, 0);
 }
 
+// ===== FUNGSI SAVE/LOAD LAST RESET DAY KE SD CARD =====
+void saveLastResetDay(int day) {
+    if (!sdCardAvailable) return;
+    digitalWrite(SPI1_NSS_PIN, LOW);
+    delay(10);
+    if (SD.exists("/lastreset.txt")) SD.remove("/lastreset.txt");
+    File f = SD.open("/lastreset.txt", FILE_WRITE);
+    if (f) { f.println(day); f.flush(); f.close(); }
+    digitalWrite(SPI1_NSS_PIN, HIGH);
+}
+
+int loadLastResetDay() {
+    digitalWrite(SPI1_NSS_PIN, LOW);
+    delay(10);
+    if (!SD.exists("/lastreset.txt")) {
+        digitalWrite(SPI1_NSS_PIN, HIGH);
+        return -1;
+    }
+    File f = SD.open("/lastreset.txt", FILE_READ);
+    if (!f) { digitalWrite(SPI1_NSS_PIN, HIGH); return -1; }
+    int day = f.readStringUntil('\n').toInt();
+    f.close();
+    digitalWrite(SPI1_NSS_PIN, HIGH);
+    return day;
+}
+
+void handleResetEnergyCommand() {
+    unsigned long ts = getCurrentTimestamp();
+    unsigned long localTs = ts + TIMEZONE_OFFSET;
+    int currentDay = localTs / 86400;
+    int lastReset = loadLastResetDay();
+    
+    Serial.print("[RESET_CMD] last:"); Serial.print(lastReset);
+    Serial.print(" curr:"); Serial.println(currentDay);
+    
+    if (currentDay != lastReset) {
+        Serial.println("[RESET] Executing...");
+        resetAllPZEMEnergy();
+        saveLastResetDay(currentDay);
+        Serial.println("[RESET] Done!");
+    } else {
+        Serial.println("[RESET] Skip (already today)");
+    }
+}
+
 // ===== FUNGSI SAVE/LOAD BASELINE KE SD CARD =====
 void saveBaselinesToSD() {
     if (!sdCardAvailable) return;
@@ -770,18 +815,12 @@ void checkAndResetEnergy() {
     int currentDay = -1;
     int currentMinute = -1;
     
-    unsigned long rawTs = 0;
-    unsigned long localTs = 0;
-    
     if (timeRefAvailable) {
-        rawTs = getCurrentTimestamp();
-        localTs = rawTs + TIMEZONE_OFFSET;
-        currentHour = (localTs % 86400) / 3600;
-        currentMinute = (localTs % 3600) / 60;
-        currentDay = (localTs / 86400);
+        currentHour = getCurrentHour();
+        currentMinute = getCurrentMinute();
+        currentDay = getDayOfYear();
     } else if (espTimestamp > 1000000) {
-        rawTs = espTimestamp;
-        localTs = rawTs + TIMEZONE_OFFSET;
+        unsigned long localTs = espTimestamp + TIMEZONE_OFFSET;
         currentHour = (localTs % 86400) / 3600;
         currentMinute = (localTs % 3600) / 60;
         currentDay = (localTs / 86400);
@@ -790,17 +829,19 @@ void checkAndResetEnergy() {
     }
     
     if (!energyResetInitialized) {
-        lastEnergyResetTimestamp = rawTs;
-        // FIX: Set lastResetDay = kemarin agar reset hari ini bisa jalan
-        lastResetDay = currentDay - 1;
-        Serial.print("[INIT] lastDay="); Serial.println(lastResetDay);
+        if (timeRefAvailable) {
+            lastEnergyResetTimestamp = getCurrentTimestamp();
+        } else {
+            lastEnergyResetTimestamp = espTimestamp;
+        }
+        lastResetDay = currentDay;
         energyResetInitialized = true;
         return;
     }
     
-    // Reset at 00:00 WIB (midnight) - ubah jam sesuai kebutuhan
-    if (currentHour == 16 && currentMinute >= 0 && currentDay != lastResetDay) {
-        Serial.print("[RESET 00:00] day:"); Serial.println(currentDay);
+    // Reset at 15:10 WIB
+    if (currentHour == 15 && currentMinute >= 10 && currentDay != lastResetDay) {
+        Serial.print("[RESET 15:10] day:"); Serial.println(currentDay);
         resetAllPZEMEnergy();
     }
 }
@@ -942,6 +983,13 @@ void receiveESP32Data() {
     if (Serial3.available()) {
         String receivedData = Serial3.readStringUntil('\n');
         receivedData.trim();
+        
+        // 0. RESET_ENERGY Command dari ESP32 (jam 00:00 WIB)
+        if (receivedData == "RESET_ENERGY") {
+            Serial.println("[ESP32] RESET_ENERGY received");
+            handleResetEnergyCommand();
+            return;
+        }
         
         // 1. Relay Command
         if (receivedData.startsWith("RELAY_")) {
@@ -1598,6 +1646,49 @@ void loop() {
                 GridEnergy = v; 
                 Serial.println("OK"); 
             }
+        } else if (command.startsWith("addenergy ")) {
+            // Menambah nilai energy tanpa menimpa data PZEM asli
+            String param = command.substring(10);
+            param.trim();
+            int sp = param.indexOf(' ');
+            if (sp > 0) {
+                // Format: addenergy pv|batt|load [value]
+                String s = param.substring(0, sp);
+                float v = param.substring(sp + 1).toFloat();
+                if (s == "pv") {
+                    PVEnergyRaw += v;
+                    PZEMEnergyPanel = PVEnergyRaw - PVEnergyBaseline;
+                    Serial.print("PV+"); Serial.print(v, 0);
+                    Serial.print("="); Serial.println(PZEMEnergyPanel, 0);
+                } else if (s == "batt") {
+                    BattEnergyRaw += v;
+                    PZEMEnergyBattery = BattEnergyRaw - BattEnergyBaseline;
+                    Serial.print("Batt+"); Serial.print(v, 0);
+                    Serial.print("="); Serial.println(PZEMEnergyBattery, 0);
+                } else if (s == "load") {
+                    LoadEnergyRaw += v;
+                    PLTSEnergy = LoadEnergyRaw - LoadEnergyBaseline;
+                    Serial.print("Load+"); Serial.print(v, 0);
+                    Serial.print("="); Serial.println(PLTSEnergy, 0);
+                } else if (s == "all") {
+                    PVEnergyRaw += v; PZEMEnergyPanel = PVEnergyRaw - PVEnergyBaseline;
+                    BattEnergyRaw += v; PZEMEnergyBattery = BattEnergyRaw - BattEnergyBaseline;
+                    LoadEnergyRaw += v; PLTSEnergy = LoadEnergyRaw - LoadEnergyBaseline;
+                    Serial.print("All+"); Serial.println(v, 0);
+                }
+            } else {
+                // Format: addenergy [value] - tambah ke semua
+                float v = param.toFloat();
+                if (v != 0) {
+                    PVEnergyRaw += v; PZEMEnergyPanel = PVEnergyRaw - PVEnergyBaseline;
+                    BattEnergyRaw += v; PZEMEnergyBattery = BattEnergyRaw - BattEnergyBaseline;
+                    LoadEnergyRaw += v; PLTSEnergy = LoadEnergyRaw - LoadEnergyBaseline;
+                    Serial.print("All+"); Serial.print(v, 0);
+                    Serial.print(" PV:"); Serial.print(PZEMEnergyPanel, 0);
+                    Serial.print(" Batt:"); Serial.print(PZEMEnergyBattery, 0);
+                    Serial.print(" Load:"); Serial.println(PLTSEnergy, 0);
+                }
+            }
         } else if (command == "energyinfo") {
             Serial.print("PV:"); Serial.print(PVEnergyRaw, 0);
             Serial.print("/"); Serial.print(PVEnergyBaseline, 0);
@@ -1678,7 +1769,8 @@ void loop() {
         } else if (command == "help" || command == "?") {
             Serial.println("baseline,savebaseline,loadbaseline,resetbaseline");
             Serial.println("setbaseline pv|batt|load [v],setraw pv|batt|load [v]");
-            Serial.println("testmode,help");
+            Serial.println("addenergy [v] | addenergy pv|batt|load|all [v]");
+            Serial.println("resetenergy,energyinfo,testmode,help");
         }
     }
 
