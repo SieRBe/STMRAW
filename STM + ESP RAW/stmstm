@@ -733,7 +733,7 @@ void resetAllPZEMEnergy() {
         if (result == nodePanel.ku8MBSuccess) {
             uint32_t tempdouble = (nodePanel.getResponseBuffer(0x0005) << 16) + nodePanel.getResponseBuffer(0x0004);
             tempEnergy = tempdouble;
-            PVEnergyRaw = tempEnergy;
+            PVEnergyRaw = tempEnergy + PVEnergyOffset;  // Add offset
             PVEnergyBaseline = PVEnergyRaw;
             pvOk = true;
             Serial.print("PV OK:"); Serial.println(PVEnergyBaseline, 0);
@@ -758,7 +758,7 @@ void resetAllPZEMEnergy() {
         if (result == nodeBattery.ku8MBSuccess) {
             uint32_t tempdouble = (nodeBattery.getResponseBuffer(0x0005) << 16) + nodeBattery.getResponseBuffer(0x0004);
             tempEnergy = tempdouble;
-            BattEnergyRaw = tempEnergy;
+            BattEnergyRaw = tempEnergy + BattEnergyOffset;  // Add offset
             BattEnergyBaseline = BattEnergyRaw;
             battOk = true;
             Serial.print("Batt OK:"); Serial.println(BattEnergyBaseline, 0);
@@ -783,7 +783,7 @@ void resetAllPZEMEnergy() {
         if (result == nodeAC.ku8MBSuccess) {
             uint32_t tempdouble = (nodeAC.getResponseBuffer(0x0006) << 16) + nodeAC.getResponseBuffer(0x0005);
             tempEnergy = tempdouble;
-            LoadEnergyRaw = tempEnergy;
+            LoadEnergyRaw = tempEnergy + LoadEnergyOffset;  // Add offset
             LoadEnergyBaseline = LoadEnergyRaw;
             loadOk = true;
             Serial.print("Load OK:"); Serial.println(LoadEnergyBaseline, 0);
