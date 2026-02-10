@@ -775,44 +775,32 @@ void checkAndResetEnergy() {
     
     if (timeRefAvailable) {
         rawTs = getCurrentTimestamp();
-        localTs = rawTs + TIMEZONE_OFFSET;  // UTC -> WIB
+        localTs = rawTs + TIMEZONE_OFFSET;
         currentHour = (localTs % 86400) / 3600;
         currentMinute = (localTs % 3600) / 60;
         currentDay = (localTs / 86400);
     } else if (espTimestamp > 1000000) {
         rawTs = espTimestamp;
-        localTs = rawTs + TIMEZONE_OFFSET;  // UTC -> WIB
+        localTs = rawTs + TIMEZONE_OFFSET;
         currentHour = (localTs % 86400) / 3600;
         currentMinute = (localTs % 3600) / 60;
         currentDay = (localTs / 86400);
     } else {
-        Serial.println("[TIME] No valid timestamp!");
         return;
     }
-    
-    // DEBUG: Selalu print waktu
-    Serial.print("[TIME] UTC:"); Serial.print(rawTs);
-    Serial.print(" WIB H:"); Serial.print(currentHour);
-    Serial.print(" M:"); Serial.print(currentMinute);
-    Serial.print(" Day:"); Serial.print(currentDay);
-    Serial.print(" LastDay:"); Serial.println(lastResetDay);
     
     if (!energyResetInitialized) {
         lastEnergyResetTimestamp = rawTs;
-        lastResetDay = currentDay;
+        // FIX: Set lastResetDay = kemarin agar reset hari ini bisa jalan
+        lastResetDay = currentDay - 1;
+        Serial.print("[INIT] lastDay="); Serial.println(lastResetDay);
         energyResetInitialized = true;
-        Serial.println("[INIT] Energy reset tracker initialized");
         return;
     }
     
-    // Reset at 15:10 WIB (atau waktu lain untuk testing)
-    bool shouldReset = (currentHour == 15 && currentMinute >= 10 && currentDay != lastResetDay);
-    Serial.print("[CHECK] Hour==15? "); Serial.print(currentHour == 15);
-    Serial.print(" Min>=10? "); Serial.print(currentMinute >= 10);
-    Serial.print(" NewDay? "); Serial.println(currentDay != lastResetDay);
-    
-    if (shouldReset) {
-        Serial.print("[RESET TRIGGER] day:"); Serial.println(currentDay);
+    // Reset at 00:00 WIB (midnight) - ubah jam sesuai kebutuhan
+    if (currentHour == 0 && currentMinute >= 0 && currentDay != lastResetDay) {
+        Serial.print("[RESET 00:00] day:"); Serial.println(currentDay);
         resetAllPZEMEnergy();
     }
 }
