@@ -799,7 +799,7 @@ void checkAndResetEnergy() {
     }
     
     // Reset at 00:00 WIB (midnight) - ubah jam sesuai kebutuhan
-    if (currentHour == 0 && currentMinute >= 0 && currentDay != lastResetDay) {
+    if (currentHour == 16 && currentMinute >= 0 && currentDay != lastResetDay) {
         Serial.print("[RESET 00:00] day:"); Serial.println(currentDay);
         resetAllPZEMEnergy();
     }
