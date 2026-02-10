@@ -50,6 +50,11 @@ float GridVoltage = 0.00, GridCurrent = 0.00, GridPower = 0.00, GridEnergy = 0, 
 float LoadEnergyRaw = 0.0;  // Nilai mentah dari PZEM AC (Load)
 float LoadEnergyBaseline = 0.0;  // Baseline untuk daily reset Load
 
+// Energy Offset untuk testing (ditambahkan ke hasil pembacaan PZEM)
+float PVEnergyOffset = 0.0;
+float BattEnergyOffset = 0.0;
+float LoadEnergyOffset = 0.0;
+
 // Variabel untuk INA219
 float ShuntVoltage = 0.00, INA219Voltage = 0.00, INA219Current = 0.00;
 bool ina219Available = false;  // Flag untuk track status INA219
@@ -736,7 +741,11 @@ void resetAllPZEMEnergy() {
         }
         delay(200);
     }
-    if (!pvOk) Serial.println("PV FAIL");
+    if (!pvOk) {
+        Serial.println("PV FAIL - using last raw");
+        PVEnergyBaseline = PVEnergyRaw;
+        Serial.print("PV Fallback:"); Serial.println(PVEnergyBaseline, 0);
+    }
     
     delay(500);
     
@@ -757,7 +766,11 @@ void resetAllPZEMEnergy() {
         }
         delay(200);
     }
-    if (!battOk) Serial.println("Batt FAIL");
+    if (!battOk) {
+        Serial.println("Batt FAIL - using last raw");
+        BattEnergyBaseline = BattEnergyRaw;
+        Serial.print("Batt Fallback:"); Serial.println(BattEnergyBaseline, 0);
+    }
     
     delay(500);
     
@@ -778,7 +791,11 @@ void resetAllPZEMEnergy() {
         }
         delay(200);
     }
-    if (!loadOk) Serial.println("Load FAIL");
+    if (!loadOk) {
+        Serial.println("Load FAIL - using last raw");
+        LoadEnergyBaseline = LoadEnergyRaw;
+        Serial.print("Load Fallback:"); Serial.println(LoadEnergyBaseline, 0);
+    }
     
     // IMMEDIATELY recalculate daily energy to 0
     PZEMEnergyPanel = PVEnergyRaw - PVEnergyBaseline;
@@ -897,8 +914,10 @@ void readPZEMData() {
         return;
     }
     
-    // Read PV with baseline calculation
-    readPZEMDC(nodePanel, PZEMVoltagePanel, PZEMCurrentPanel, PZEMPowerPanel, PVEnergyRaw);
+    // Read PV with baseline calculation + offset
+    float tempPVEnergy = 0;
+    readPZEMDC(nodePanel, PZEMVoltagePanel, PZEMCurrentPanel, PZEMPowerPanel, tempPVEnergy);
+    PVEnergyRaw = tempPVEnergy + PVEnergyOffset;  // Add offset
     PZEMEnergyPanel = PVEnergyRaw - PVEnergyBaseline;
     if (PZEMEnergyPanel < 0) PZEMEnergyPanel = 0;
     
@@ -907,8 +926,10 @@ void readPZEMData() {
     
     delay(200);
 
-    // Read Battery with baseline calculation
-    readPZEMDC(nodeBattery, PZEMVoltageBattery, PZEMCurrentBattery, PZEMPowerBattery, BattEnergyRaw);
+    // Read Battery with baseline calculation + offset
+    float tempBattEnergy = 0;
+    readPZEMDC(nodeBattery, PZEMVoltageBattery, PZEMCurrentBattery, PZEMPowerBattery, tempBattEnergy);
+    BattEnergyRaw = tempBattEnergy + BattEnergyOffset;  // Add offset
     PZEMEnergyBattery = BattEnergyRaw - BattEnergyBaseline;
     if (PZEMEnergyBattery < 0) PZEMEnergyBattery = 0;
     
@@ -917,8 +938,10 @@ void readPZEMData() {
     
     delay(200);
 
-    // Read Load with baseline calculation
-    readPZEMAC(nodeAC, voltageAC, currentAC, powerAC, LoadEnergyRaw, frequencyAC, powerFactorAC);
+    // Read Load with baseline calculation + offset
+    float tempLoadEnergy = 0;
+    readPZEMAC(nodeAC, voltageAC, currentAC, powerAC, tempLoadEnergy, frequencyAC, powerFactorAC);
+    LoadEnergyRaw = tempLoadEnergy + LoadEnergyOffset;  // Add offset
     PLTSEnergy = LoadEnergyRaw - LoadEnergyBaseline;
     if (PLTSEnergy < 0) PLTSEnergy = 0;
     
@@ -1766,11 +1789,53 @@ void loop() {
                 else if (s == "batt") { BattEnergyRaw = v; Serial.println(v, 0); }
                 else if (s == "load") { LoadEnergyRaw = v; Serial.println(v, 0); }
             }
+        } else if (command.startsWith("addoffset ")) {
+            // Format: addoffset pv|batt|load|all [value]
+            String param = command.substring(10);
+            param.trim();
+            int sp = param.indexOf(' ');
+            if (sp > 0) {
+                String s = param.substring(0, sp);
+                float v = param.substring(sp + 1).toFloat();
+                if (s == "pv") { PVEnergyOffset += v; Serial.print("PV Offset:"); Serial.println(PVEnergyOffset, 0); }
+                else if (s == "batt") { BattEnergyOffset += v; Serial.print("Batt Offset:"); Serial.println(BattEnergyOffset, 0); }
+                else if (s == "load") { LoadEnergyOffset += v; Serial.print("Load Offset:"); Serial.println(LoadEnergyOffset, 0); }
+                else if (s == "all") {
+                    PVEnergyOffset += v; BattEnergyOffset += v; LoadEnergyOffset += v;
+                    Serial.print("All Offset +"); Serial.println(v, 0);
+                }
+            } else {
+                float v = param.toFloat();
+                if (v != 0) {
+                    PVEnergyOffset += v; BattEnergyOffset += v; LoadEnergyOffset += v;
+                    Serial.print("All Offset +"); Serial.println(v, 0);
+                }
+            }
+        } else if (command.startsWith("setoffset ")) {
+            // Format: setoffset pv|batt|load [value]
+            String param = command.substring(10);
+            param.trim();
+            int sp = param.indexOf(' ');
+            if (sp > 0) {
+                String s = param.substring(0, sp);
+                float v = param.substring(sp + 1).toFloat();
+                if (s == "pv") { PVEnergyOffset = v; Serial.println(v, 0); }
+                else if (s == "batt") { BattEnergyOffset = v; Serial.println(v, 0); }
+                else if (s == "load") { LoadEnergyOffset = v; Serial.println(v, 0); }
+            }
+        } else if (command == "clearoffset" || command == "offsetclear") {
+            PVEnergyOffset = 0; BattEnergyOffset = 0; LoadEnergyOffset = 0;
+            Serial.println("Offset cleared");
+        } else if (command == "offsetinfo" || command == "offset") {
+            Serial.print("Offset PV:"); Serial.print(PVEnergyOffset, 0);
+            Serial.print(" Batt:"); Serial.print(BattEnergyOffset, 0);
+            Serial.print(" Load:"); Serial.println(LoadEnergyOffset, 0);
         } else if (command == "help" || command == "?") {
             Serial.println("baseline,savebaseline,loadbaseline,resetbaseline");
             Serial.println("setbaseline pv|batt|load [v],setraw pv|batt|load [v]");
             Serial.println("addenergy [v] | addenergy pv|batt|load|all [v]");
-            Serial.println("resetenergy,energyinfo,testmode,help");
+            Serial.println("addoffset [v] | setoffset pv|batt|load [v] | clearoffset");
+            Serial.println("resetenergy,energyinfo,offsetinfo,testmode,help");
         }
     }
 
