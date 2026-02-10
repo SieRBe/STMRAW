@@ -177,7 +177,7 @@ int lastResetDay = -1;  // Hari terakhir reset dilakukan (-1 = belum pernah)
 const int TIMEZONE_OFFSET = 7 * 3600;  // WIB = UTC+7 (dalam detik)
 
 // Manual Control Mode - untuk mencegah auto-switching relay
-bool manualControlMode = false;  // Flag untuk manual control via web
+bool manualControlMode = true;  // Flag untuk manual control via web (default: true = no auto control)
 // Manual control aktif terus sampai command 'automode' diterima
 
 // Status SD Card
@@ -479,6 +479,13 @@ void updateTimeRef(unsigned long newTimestamp) {
 // ===== FUNGSI KONTROL RELAY VIA COMMAND DARI ESP32 =====
 void handleRelayCommand(String command) {
     command.trim();
+    
+    // Validasi panjang command untuk filter noise/garbage data
+    if (command.length() < 10 || command.length() > 25) {
+        Serial.print("CMD_INVALID:");
+        Serial.println(command.length());
+        return;
+    }
     
     if (command != "GET_RELAY_STATUS") {
         manualControlMode = true;
@@ -1517,17 +1524,14 @@ void printWriteState() {
 }
 
 void urgent() {
+    // Hanya overcurrent protection - tidak auto ON relay
     if (PZEMCurrentBattery > 10.0) {
         digitalWrite(RELAY_Batt, LOW);
         Serial.println("OVERCURR!");
         return;
     }
-    
-    if (manualControlMode) {
-        return;
-    }
-    
-    digitalWrite(RELAY_Batt, HIGH);
+    // Auto-ON relay dihapus untuk mencegah relay switch sendiri
+    // Relay hanya dikontrol via command dari web/serial
 }
 
 void initialSOC () {
