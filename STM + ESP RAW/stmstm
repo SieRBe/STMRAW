@@ -665,26 +665,102 @@ bool loadBaselinesFromSD() {
 
 void resetAllPZEMEnergy() {
     Serial.println("[RESET ALL PZEM]");
-    delay(200); 
     
-    readPZEMDC(nodePanel, PZEMVoltagePanel, PZEMCurrentPanel, PZEMPowerPanel, PVEnergyRaw);
-    PVEnergyBaseline = PVEnergyRaw;
-    Serial.print("PV:"); Serial.println(PVEnergyBaseline, 0);
-    delay(300); 
+    // Print BEFORE values
+    Serial.print("BEFORE PV:"); Serial.print(PVEnergyRaw, 0);
+    Serial.print("/"); Serial.print(PVEnergyBaseline, 0);
+    Serial.print("/"); Serial.println(PZEMEnergyPanel, 0);
     
-    readPZEMDC(nodeBattery, PZEMVoltageBattery, PZEMCurrentBattery, PZEMPowerBattery, BattEnergyRaw);
-    BattEnergyBaseline = BattEnergyRaw;
-    Serial.print("Batt:"); Serial.println(BattEnergyBaseline, 0);
-    delay(300); 
+    delay(500);
     
-    readPZEMAC(nodeAC, voltageAC, currentAC, powerAC, LoadEnergyRaw, frequencyAC, powerFactorAC);
-    LoadEnergyBaseline = LoadEnergyRaw;
-    Serial.print("Load:"); Serial.println(LoadEnergyBaseline, 0);
+    // Read PV - fresh read with retry
+    float tempEnergy = 0;
+    bool pvOk = false;
+    for (int i = 0; i < 3; i++) {
+        while (Serial2.available()) Serial2.read();
+        delay(100);
+        uint8_t result = nodePanel.readInputRegisters(0x0000, 6);
+        if (result == nodePanel.ku8MBSuccess) {
+            uint32_t tempdouble = (nodePanel.getResponseBuffer(0x0005) << 16) + nodePanel.getResponseBuffer(0x0004);
+            tempEnergy = tempdouble;
+            PVEnergyRaw = tempEnergy;
+            PVEnergyBaseline = PVEnergyRaw;
+            pvOk = true;
+            Serial.print("PV OK:"); Serial.println(PVEnergyBaseline, 0);
+            break;
+        }
+        delay(200);
+    }
+    if (!pvOk) Serial.println("PV FAIL");
     
+    delay(500);
+    
+    // Read Battery - fresh read with retry
+    bool battOk = false;
+    for (int i = 0; i < 3; i++) {
+        while (Serial2.available()) Serial2.read();
+        delay(100);
+        uint8_t result = nodeBattery.readInputRegisters(0x0000, 6);
+        if (result == nodeBattery.ku8MBSuccess) {
+            uint32_t tempdouble = (nodeBattery.getResponseBuffer(0x0005) << 16) + nodeBattery.getResponseBuffer(0x0004);
+            tempEnergy = tempdouble;
+            BattEnergyRaw = tempEnergy;
+            BattEnergyBaseline = BattEnergyRaw;
+            battOk = true;
+            Serial.print("Batt OK:"); Serial.println(BattEnergyBaseline, 0);
+            break;
+        }
+        delay(200);
+    }
+    if (!battOk) Serial.println("Batt FAIL");
+    
+    delay(500);
+    
+    // Read Load AC - fresh read with retry
+    bool loadOk = false;
+    for (int i = 0; i < 3; i++) {
+        while (Serial2.available()) Serial2.read();
+        delay(100);
+        uint8_t result = nodeAC.readInputRegisters(0x0000, 9);
+        if (result == nodeAC.ku8MBSuccess) {
+            uint32_t tempdouble = (nodeAC.getResponseBuffer(0x0006) << 16) + nodeAC.getResponseBuffer(0x0005);
+            tempEnergy = tempdouble;
+            LoadEnergyRaw = tempEnergy;
+            LoadEnergyBaseline = LoadEnergyRaw;
+            loadOk = true;
+            Serial.print("Load OK:"); Serial.println(LoadEnergyBaseline, 0);
+            break;
+        }
+        delay(200);
+    }
+    if (!loadOk) Serial.println("Load FAIL");
+    
+    // IMMEDIATELY recalculate daily energy to 0
+    PZEMEnergyPanel = PVEnergyRaw - PVEnergyBaseline;
+    if (PZEMEnergyPanel < 0) PZEMEnergyPanel = 0;
+    
+    PZEMEnergyBattery = BattEnergyRaw - BattEnergyBaseline;
+    if (PZEMEnergyBattery < 0) PZEMEnergyBattery = 0;
+    
+    PLTSEnergy = LoadEnergyRaw - LoadEnergyBaseline;
+    if (PLTSEnergy < 0) PLTSEnergy = 0;
+    
+    // Save to SD
     saveBaselinesToSD();
     
     lastEnergyResetTimestamp = getCurrentTimestamp();
     lastResetDay = getDayOfYear();
+    
+    // Print AFTER values - should all be 0
+    Serial.print("AFTER PV:"); Serial.print(PVEnergyRaw, 0);
+    Serial.print("/"); Serial.print(PVEnergyBaseline, 0);
+    Serial.print("/"); Serial.println(PZEMEnergyPanel, 0);
+    Serial.print("AFTER Batt:"); Serial.print(BattEnergyRaw, 0);
+    Serial.print("/"); Serial.print(BattEnergyBaseline, 0);
+    Serial.print("/"); Serial.println(PZEMEnergyBattery, 0);
+    Serial.print("AFTER Load:"); Serial.print(LoadEnergyRaw, 0);
+    Serial.print("/"); Serial.print(LoadEnergyBaseline, 0);
+    Serial.print("/"); Serial.println(PLTSEnergy, 0);
     
     Serial.println("[RESET OK]");
 }
@@ -719,7 +795,7 @@ void checkAndResetEnergy() {
     }
     
     // Reset at 15:10 WIB
-    if (currentHour == 15 && currentMinute >= 10 && currentDay != lastResetDay) {
+    if (currentHour == 15 && currentMinute >= 25 && currentDay != lastResetDay) {
         Serial.print("[RESET 15:10] day:"); Serial.println(currentDay);
         resetAllPZEMEnergy();
     }
