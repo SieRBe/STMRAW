@@ -140,6 +140,48 @@ globals:
   - id: stm32_data_received_count
     type: uint32_t
     initial_value: '0'
+  - id: relay_cmd_block_until
+    type: uint32_t
+    initial_value: '0'
+  - id: relay_cmd_debounce_ms
+    type: uint32_t
+    initial_value: '400'
+  - id: last_relay_cmd_ms_inv
+    type: uint32_t
+    initial_value: '0'
+  - id: last_relay_cmd_ms_batt
+    type: uint32_t
+    initial_value: '0'
+  - id: last_relay_cmd_ms_ats_n
+    type: uint32_t
+    initial_value: '0'
+  - id: last_relay_cmd_ms_ats_f
+    type: uint32_t
+    initial_value: '0'
+  - id: relay_inv_state
+    type: bool
+    initial_value: 'false'
+  - id: relay_inv_known
+    type: bool
+    initial_value: 'false'
+  - id: relay_batt_state
+    type: bool
+    initial_value: 'false'
+  - id: relay_batt_known
+    type: bool
+    initial_value: 'false'
+  - id: relay_ats_n_state
+    type: bool
+    initial_value: 'false'
+  - id: relay_ats_n_known
+    type: bool
+    initial_value: 'false'
+  - id: relay_ats_f_state
+    type: bool
+    initial_value: 'false'
+  - id: relay_ats_f_known
+    type: bool
+    initial_value: 'false'
 
 binary_sensor:
   - platform: daly_bms_ble
@@ -210,63 +252,29 @@ switch:
   
   # === REMOTE RELAY CONTROL VIA STM32 ===
   # IMPORTANT: Gunakan optimistic: true + internal: true
-  # agar ESPHome TIDAK subscribe MQTT command topic
-  # (relay dikontrol dari web via relay_control.php langsung)
   - platform: template
     name: "${name} STM32 Relay Inverter"
     id: stm32_relay_inv
     optimistic: true
     internal: true
-    turn_on_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_INV_ON\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_INV_ON");
-    turn_off_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_INV_OFF\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_INV_OFF");
   
   - platform: template
     name: "${name} STM32 Relay Battery"
     id: stm32_relay_batt
     optimistic: true
     internal: true
-    turn_on_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_BATT_ON\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_BATT_ON");
-    turn_off_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_BATT_OFF\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_BATT_OFF");
   
   - platform: template
     name: "${name} STM32 Relay ATS Normal"
     id: stm32_relay_ats_n
     optimistic: true
     internal: true
-    turn_on_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_ATS_N_ON\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_N_ON");
-    turn_off_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_ATS_N_OFF\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_N_OFF");
   
   - platform: template
     name: "${name} STM32 Relay ATS Fail"
     id: stm32_relay_ats_f
     optimistic: true
     internal: true
-    turn_on_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_ATS_F_ON\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_F_ON");
-    turn_off_action:
-      - lambda: |-
-          id(stm32_uart).write_str("RELAY_ATS_F_OFF\n");
-          ESP_LOGI("relay", "📤 Command sent: RELAY_ATS_F_OFF");
 
 i2c:
   sda: GPIO21
@@ -1099,6 +1107,8 @@ interval:
                   std::string status = received_data.substr(17);
                   bool isOn = (status == "ON");
                   id(stm32_relay_inv).publish_state(isOn);
+                  id(relay_inv_state) = isOn;
+                  id(relay_inv_known) = true;
                   // Publish to MQTT state topic for web UI
                   id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_inverter/state", isOn ? "ON" : "OFF");
                   ESP_LOGI("relay", "✅ Inverter relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
@@ -1107,6 +1117,8 @@ interval:
                   std::string status = received_data.substr(18);
                   bool isOn = (status == "ON");
                   id(stm32_relay_batt).publish_state(isOn);
+                  id(relay_batt_state) = isOn;
+                  id(relay_batt_known) = true;
                   id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_battery/state", isOn ? "ON" : "OFF");
                   ESP_LOGI("relay", "✅ Battery relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 }
@@ -1114,6 +1126,8 @@ interval:
                   std::string status = received_data.substr(19);
                   bool isOn = (status == "ON");
                   id(stm32_relay_ats_n).publish_state(isOn);
+                  id(relay_ats_n_state) = isOn;
+                  id(relay_ats_n_known) = true;
                   id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_ats_normal/state", isOn ? "ON" : "OFF");
                   ESP_LOGI("relay", "✅ ATS Normal relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 }
@@ -1121,6 +1135,8 @@ interval:
                   std::string status = received_data.substr(19);
                   bool isOn = (status == "ON");
                   id(stm32_relay_ats_f).publish_state(isOn);
+                  id(relay_ats_f_state) = isOn;
+                  id(relay_ats_f_known) = true;
                   id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_ats_fail/state", isOn ? "ON" : "OFF");
                   ESP_LOGI("relay", "✅ ATS Fail relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 } 
@@ -1205,6 +1221,9 @@ mqtt:
   on_connect:
     - lambda: |-
         ESP_LOGI("mqtt", "✅ Connected to VPS MQTT Broker");
+        id(relay_cmd_block_until) = millis() + 5000;
+        id(stm32_uart).write_str("GET_RELAY_STATUS\n");
+        ESP_LOGI("mqtt_relay", "Requesting relay status (cooldown 5s)");
   
   on_disconnect:
     - lambda: |-
@@ -1216,49 +1235,105 @@ mqtt:
       then:
         - lambda: |-
             std::string cmd = x;
-            if (cmd == "ON") {
-              id(stm32_uart).write_str("RELAY_INV_ON\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_INV_ON sent to STM32");
-            } else if (cmd == "OFF") {
-              id(stm32_uart).write_str("RELAY_INV_OFF\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_INV_OFF sent to STM32");
+            auto now = millis();
+            if (now < id(relay_cmd_block_until)) {
+              ESP_LOGW("mqtt_relay", "Relay cmd blocked (cooldown)");
+              return;
             }
+            if (cmd != "ON" && cmd != "OFF") {
+              ESP_LOGW("mqtt_relay", "Invalid relay payload");
+              return;
+            }
+            bool want_on = (cmd == "ON");
+            if (id(relay_inv_known) && id(relay_inv_state) == want_on) {
+              ESP_LOGI("mqtt_relay", "Relay INV already in requested state");
+              return;
+            }
+            if (now - id(last_relay_cmd_ms_inv) < id(relay_cmd_debounce_ms)) {
+              ESP_LOGW("mqtt_relay", "Relay INV debounce");
+              return;
+            }
+            id(last_relay_cmd_ms_inv) = now;
+            id(stm32_uart).write_str(want_on ? "RELAY_INV_ON\n" : "RELAY_INV_OFF\n");
+            ESP_LOGI("mqtt_relay", "📤 RELAY_INV_%s sent to STM32", want_on ? "ON" : "OFF");
     
     - topic: fixgoal2/switch/fixgoal2_stm32_relay_battery/command
       then:
         - lambda: |-
             std::string cmd = x;
-            if (cmd == "ON") {
-              id(stm32_uart).write_str("RELAY_BATT_ON\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_BATT_ON sent to STM32");
-            } else if (cmd == "OFF") {
-              id(stm32_uart).write_str("RELAY_BATT_OFF\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_BATT_OFF sent to STM32");
+            auto now = millis();
+            if (now < id(relay_cmd_block_until)) {
+              ESP_LOGW("mqtt_relay", "Relay cmd blocked (cooldown)");
+              return;
             }
+            if (cmd != "ON" && cmd != "OFF") {
+              ESP_LOGW("mqtt_relay", "Invalid relay payload");
+              return;
+            }
+            bool want_on = (cmd == "ON");
+            if (id(relay_batt_known) && id(relay_batt_state) == want_on) {
+              ESP_LOGI("mqtt_relay", "Relay BATT already in requested state");
+              return;
+            }
+            if (now - id(last_relay_cmd_ms_batt) < id(relay_cmd_debounce_ms)) {
+              ESP_LOGW("mqtt_relay", "Relay BATT debounce");
+              return;
+            }
+            id(last_relay_cmd_ms_batt) = now;
+            id(stm32_uart).write_str(want_on ? "RELAY_BATT_ON\n" : "RELAY_BATT_OFF\n");
+            ESP_LOGI("mqtt_relay", "📤 RELAY_BATT_%s sent to STM32", want_on ? "ON" : "OFF");
     
     - topic: fixgoal2/switch/fixgoal2_stm32_relay_ats_normal/command
       then:
         - lambda: |-
             std::string cmd = x;
-            if (cmd == "ON") {
-              id(stm32_uart).write_str("RELAY_ATS_N_ON\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_N_ON sent to STM32");
-            } else if (cmd == "OFF") {
-              id(stm32_uart).write_str("RELAY_ATS_N_OFF\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_N_OFF sent to STM32");
+            auto now = millis();
+            if (now < id(relay_cmd_block_until)) {
+              ESP_LOGW("mqtt_relay", "Relay cmd blocked (cooldown)");
+              return;
             }
+            if (cmd != "ON" && cmd != "OFF") {
+              ESP_LOGW("mqtt_relay", "Invalid relay payload");
+              return;
+            }
+            bool want_on = (cmd == "ON");
+            if (id(relay_ats_n_known) && id(relay_ats_n_state) == want_on) {
+              ESP_LOGI("mqtt_relay", "Relay ATS_N already in requested state");
+              return;
+            }
+            if (now - id(last_relay_cmd_ms_ats_n) < id(relay_cmd_debounce_ms)) {
+              ESP_LOGW("mqtt_relay", "Relay ATS_N debounce");
+              return;
+            }
+            id(last_relay_cmd_ms_ats_n) = now;
+            id(stm32_uart).write_str(want_on ? "RELAY_ATS_N_ON\n" : "RELAY_ATS_N_OFF\n");
+            ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_N_%s sent to STM32", want_on ? "ON" : "OFF");
     
     - topic: fixgoal2/switch/fixgoal2_stm32_relay_ats_fail/command
       then:
         - lambda: |-
             std::string cmd = x;
-            if (cmd == "ON") {
-              id(stm32_uart).write_str("RELAY_ATS_F_ON\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_F_ON sent to STM32");
-            } else if (cmd == "OFF") {
-              id(stm32_uart).write_str("RELAY_ATS_F_OFF\n");
-              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_F_OFF sent to STM32");
+            auto now = millis();
+            if (now < id(relay_cmd_block_until)) {
+              ESP_LOGW("mqtt_relay", "Relay cmd blocked (cooldown)");
+              return;
             }
+            if (cmd != "ON" && cmd != "OFF") {
+              ESP_LOGW("mqtt_relay", "Invalid relay payload");
+              return;
+            }
+            bool want_on = (cmd == "ON");
+            if (id(relay_ats_f_known) && id(relay_ats_f_state) == want_on) {
+              ESP_LOGI("mqtt_relay", "Relay ATS_F already in requested state");
+              return;
+            }
+            if (now - id(last_relay_cmd_ms_ats_f) < id(relay_cmd_debounce_ms)) {
+              ESP_LOGW("mqtt_relay", "Relay ATS_F debounce");
+              return;
+            }
+            id(last_relay_cmd_ms_ats_f) = now;
+            id(stm32_uart).write_str(want_on ? "RELAY_ATS_F_ON\n" : "RELAY_ATS_F_OFF\n");
+            ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_F_%s sent to STM32", want_on ? "ON" : "OFF");
 
 ota:
   platform: esphome
