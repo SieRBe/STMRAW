@@ -1,7 +1,3 @@
-5][W][stm32_data:1087]: ❌ Invalid STM32 data format. Expected 11 or 8 fields, got 13
-[13:37:27.741][W][stm32_data:1088]:    New format (11): PVVoltage,PVCurrent,PVPower,PVEnergy,BattVoltage,BattCurrent,BattPower,BattEnergy,INA219Voltage,INA219Current,ShuntVoltage
-[13:37:27.753][W][stm32_data:1089]:    Old format (8): pv_voltage,pv_current,pv_power,batt_voltage,batt_current,batt_power,ina_voltage,ina_current
-
 substitutions:
   name: fixgoal2
   device_description: "Monitor a DALY Battery Management System via BLE"
@@ -213,10 +209,14 @@ switch:
     name: "${name} enable bluetooth connection"
   
   # === REMOTE RELAY CONTROL VIA STM32 ===
+  # IMPORTANT: Gunakan optimistic: true + internal: true
+  # agar ESPHome TIDAK subscribe MQTT command topic
+  # (relay dikontrol dari web via relay_control.php langsung)
   - platform: template
     name: "${name} STM32 Relay Inverter"
     id: stm32_relay_inv
-    optimistic: false
+    optimistic: true
+    internal: true
     turn_on_action:
       - lambda: |-
           id(stm32_uart).write_str("RELAY_INV_ON\n");
@@ -229,7 +229,8 @@ switch:
   - platform: template
     name: "${name} STM32 Relay Battery"
     id: stm32_relay_batt
-    optimistic: false
+    optimistic: true
+    internal: true
     turn_on_action:
       - lambda: |-
           id(stm32_uart).write_str("RELAY_BATT_ON\n");
@@ -242,7 +243,8 @@ switch:
   - platform: template
     name: "${name} STM32 Relay ATS Normal"
     id: stm32_relay_ats_n
-    optimistic: false
+    optimistic: true
+    internal: true
     turn_on_action:
       - lambda: |-
           id(stm32_uart).write_str("RELAY_ATS_N_ON\n");
@@ -255,7 +257,8 @@ switch:
   - platform: template
     name: "${name} STM32 Relay ATS Fail"
     id: stm32_relay_ats_f
-    optimistic: false
+    optimistic: true
+    internal: true
     turn_on_action:
       - lambda: |-
           id(stm32_uart).write_str("RELAY_ATS_F_ON\n");
@@ -616,6 +619,21 @@ time:
         then:
           - logger.log: "⏰ Periodic NTP sync (6 hour interval)"
           - component.update: sntp_time
+      
+      # RESET ENERGY setiap jam 16:15:05 WIB (TESTING)
+      - hours: 0
+        minutes: 0
+        seconds: 5
+        then:
+          - logger.log: "🔄 [16:15:05] Sending RESET_ENERGY to STM32"
+          - uart.write:
+              id: stm32_uart
+              data: "RESET_ENERGY\n"
+          - delay: 2s
+          - uart.write:
+              id: stm32_uart
+              data: "RESET_ENERGY\n"
+          - logger.log: "✅ RESET_ENERGY command sent (2x)"
 
 # UART Configuration for bidirectional STM32 communication
 uart:
@@ -977,6 +995,61 @@ interval:
                     ESP_LOGW("stm32_data", "❌ Invalid sensor values detected (NaN)");
                   }
                 }
+                else if (values.size() == 13) {
+                  // Format 13 field (Grid dihapus, hanya PLTS):
+                  // PZEMVoltagePanel,PZEMCurrentPanel,PZEMPowerPanel,PZEMEnergyPanel,
+                  // PZEMVoltageBattery,PZEMCurrentBattery,PZEMPowerBattery,PZEMEnergyBattery,
+                  // INA219Voltage,INA219Current,ShuntVoltage,
+                  // PLTSPower,PLTSEnergy
+                  float pv_voltage = values[0];
+                  float pv_current = values[1];
+                  float pv_power = values[2];
+                  float pv_energy = values[3];
+                  float batt_voltage = values[4];
+                  float batt_current = values[5];
+                  float batt_power = values[6];
+                  float batt_energy = values[7];
+                  float ina_voltage = values[8];
+                  float ina_current = values[9];
+                  float shunt_voltage = values[10];
+                  float plts_power = values[11];
+                  float plts_energy = values[12];
+                  
+                  // Validate values
+                  if (!isnan(pv_voltage) && !isnan(pv_current) && !isnan(pv_power) && !isnan(pv_energy) &&
+                      !isnan(batt_voltage) && !isnan(batt_current) && !isnan(batt_power) && !isnan(batt_energy) &&
+                      !isnan(ina_voltage) && !isnan(ina_current) && !isnan(shunt_voltage) &&
+                      !isnan(plts_power) && !isnan(plts_energy)) {
+                    
+                    // Update sensors
+                    id(stm32_pv_voltage).publish_state(pv_voltage);
+                    id(stm32_pv_current).publish_state(pv_current);
+                    id(stm32_pv_power).publish_state(pv_power);
+                    id(stm32_pv_energy).publish_state(pv_energy);
+                    id(stm32_batt_voltage).publish_state(batt_voltage);
+                    id(stm32_batt_current).publish_state(batt_current);
+                    id(stm32_batt_power).publish_state(batt_power);
+                    id(stm32_batt_energy).publish_state(batt_energy);
+                    id(stm32_ina_voltage).publish_state(ina_voltage);
+                    id(stm32_ina_current).publish_state(ina_current);
+                    id(stm32_shunt_voltage).publish_state(shunt_voltage);
+                    id(stm32_plts_power).publish_state(plts_power);
+                    id(stm32_plts_energy).publish_state(plts_energy);
+                    id(stm32_grid_power).publish_state(0.0);  // Grid dihapus
+                    id(stm32_grid_energy).publish_state(0.0); // Grid dihapus
+                    
+                    // Update data count
+                    id(stm32_data_count).publish_state(id(stm32_data_received_count));
+                    
+                    ESP_LOGI("stm32_data", "✅ STM32 Data parsed successfully (13 fields - no Grid):");
+                    ESP_LOGI("stm32_data", "   ⚡ PZEM Panel: %.2fV %.2fA %.1fW %.0fWh", pv_voltage, pv_current, pv_power, pv_energy);
+                    ESP_LOGI("stm32_data", "   🔋 PZEM Battery: %.2fV %.2fA %.1fW %.0fWh", batt_voltage, batt_current, batt_power, batt_energy);
+                    ESP_LOGI("stm32_data", "   🔌 INA219: %.2fV %.3fA | Shunt: %.2fmV", ina_voltage, ina_current, shunt_voltage);
+                    ESP_LOGI("stm32_data", "   🏠 PLTS Load: %.1fW %.0fWh", plts_power, plts_energy);
+                  } else {
+                    ESP_LOGW("stm32_data", "❌ Invalid sensor values detected (NaN)");
+                  }
+                }
                 else if (values.size() == 11) {
                   // Support backward compatibility untuk 11 fieldEMPowerBattery,PZEMEnergyBattery,
                   // INA219Voltage,INA219Current,ShuntVoltage
@@ -1021,30 +1094,35 @@ interval:
                     ESP_LOGW("stm32_data", "❌ Invalid sensor values detected (NaN)");
                   }
                 }
-                // Handle relay status feedback
+                // Handle relay status feedback - publish to MQTT directly
                 else if (received_data.find("RELAY_INV_STATUS:") == 0) {
                   std::string status = received_data.substr(17);
                   bool isOn = (status == "ON");
                   id(stm32_relay_inv).publish_state(isOn);
-                  ESP_LOGI("relay", "✅ Inverter relay status updated: %s", isOn ? "ON" : "OFF");
+                  // Publish to MQTT state topic for web UI
+                  id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_inverter/state", isOn ? "ON" : "OFF");
+                  ESP_LOGI("relay", "✅ Inverter relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 }
                 else if (received_data.find("RELAY_BATT_STATUS:") == 0) {
                   std::string status = received_data.substr(18);
                   bool isOn = (status == "ON");
                   id(stm32_relay_batt).publish_state(isOn);
-                  ESP_LOGI("relay", "✅ Battery relay status updated: %s", isOn ? "ON" : "OFF");
+                  id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_battery/state", isOn ? "ON" : "OFF");
+                  ESP_LOGI("relay", "✅ Battery relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 }
                 else if (received_data.find("RELAY_ATS_N_STATUS:") == 0) {
                   std::string status = received_data.substr(19);
                   bool isOn = (status == "ON");
                   id(stm32_relay_ats_n).publish_state(isOn);
-                  ESP_LOGI("relay", "✅ ATS Normal relay status updated: %s", isOn ? "ON" : "OFF");
+                  id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_ats_normal/state", isOn ? "ON" : "OFF");
+                  ESP_LOGI("relay", "✅ ATS Normal relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 }
                 else if (received_data.find("RELAY_ATS_F_STATUS:") == 0) {
                   std::string status = received_data.substr(19);
                   bool isOn = (status == "ON");
                   id(stm32_relay_ats_f).publish_state(isOn);
-                  ESP_LOGI("relay", "✅ ATS Fail relay status updated: %s", isOn ? "ON" : "OFF");
+                  id(mqtt_client).publish("fixgoal2/switch/fixgoal2_stm32_relay_ats_fail/state", isOn ? "ON" : "OFF");
+                  ESP_LOGI("relay", "✅ ATS Fail relay status: %s (MQTT published)", isOn ? "ON" : "OFF");
                 } 
                 // Backward compatibility: 8 field format (old)
                 else if (values.size() == 8) {
@@ -1088,8 +1166,9 @@ interval:
                   }
                 } 
                 else {
-                  ESP_LOGW("stm32_data", "❌ Invalid STM32 data format. Expected 11 or 8 fields, got %d", values.size());
-                  ESP_LOGW("stm32_data", "   New format (11): PVVoltage,PVCurrent,PVPower,PVEnergy,BattVoltage,BattCurrent,BattPower,BattEnergy,INA219Voltage,INA219Current,ShuntVoltage");
+                  ESP_LOGW("stm32_data", "❌ Invalid STM32 data format. Expected 15, 13, 11 or 8 fields, got %d", values.size());
+                  ESP_LOGW("stm32_data", "   Current format (13): PVVoltage,PVCurrent,PVPower,PVEnergy,BattVoltage,BattCurrent,BattPower,BattEnergy,INA219Voltage,INA219Current,ShuntVoltage,PLTSPower,PLTSEnergy");
+                  ESP_LOGW("stm32_data", "   Old format (11): Same as above without PLTS fields");
                   ESP_LOGW("stm32_data", "   Old format (8): pv_voltage,pv_current,pv_power,batt_voltage,batt_current,batt_power,ina_voltage,ina_current");
                 }
                 
@@ -1105,6 +1184,7 @@ api:
 
 # MQTT Configuration for Web Live Monitoring (HiveMQ Cloud)
 mqtt:
+  id: mqtt_client
   broker: "72.61.208.25"  # ← Ganti dengan IP VPS Anda
   port: 1883
   username: "bimantara"
@@ -1129,6 +1209,56 @@ mqtt:
   on_disconnect:
     - lambda: |-
         ESP_LOGW("mqtt", "⚠️ Disconnected from VPS MQTT Broker");
+  
+  # Custom MQTT handlers untuk relay control (bypass ESPHome switch mechanism)
+  on_message:
+    - topic: fixgoal2/switch/fixgoal2_stm32_relay_inverter/command
+      then:
+        - lambda: |-
+            std::string cmd = x;
+            if (cmd == "ON") {
+              id(stm32_uart).write_str("RELAY_INV_ON\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_INV_ON sent to STM32");
+            } else if (cmd == "OFF") {
+              id(stm32_uart).write_str("RELAY_INV_OFF\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_INV_OFF sent to STM32");
+            }
+    
+    - topic: fixgoal2/switch/fixgoal2_stm32_relay_battery/command
+      then:
+        - lambda: |-
+            std::string cmd = x;
+            if (cmd == "ON") {
+              id(stm32_uart).write_str("RELAY_BATT_ON\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_BATT_ON sent to STM32");
+            } else if (cmd == "OFF") {
+              id(stm32_uart).write_str("RELAY_BATT_OFF\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_BATT_OFF sent to STM32");
+            }
+    
+    - topic: fixgoal2/switch/fixgoal2_stm32_relay_ats_normal/command
+      then:
+        - lambda: |-
+            std::string cmd = x;
+            if (cmd == "ON") {
+              id(stm32_uart).write_str("RELAY_ATS_N_ON\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_N_ON sent to STM32");
+            } else if (cmd == "OFF") {
+              id(stm32_uart).write_str("RELAY_ATS_N_OFF\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_N_OFF sent to STM32");
+            }
+    
+    - topic: fixgoal2/switch/fixgoal2_stm32_relay_ats_fail/command
+      then:
+        - lambda: |-
+            std::string cmd = x;
+            if (cmd == "ON") {
+              id(stm32_uart).write_str("RELAY_ATS_F_ON\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_F_ON sent to STM32");
+            } else if (cmd == "OFF") {
+              id(stm32_uart).write_str("RELAY_ATS_F_OFF\n");
+              ESP_LOGI("mqtt_relay", "📤 RELAY_ATS_F_OFF sent to STM32");
+            }
 
 ota:
   platform: esphome
