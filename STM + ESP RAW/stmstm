@@ -487,41 +487,47 @@ void handleRelayCommand(String command) {
         return;
     }
     
-    if (command != "GET_RELAY_STATUS") {
-        manualControlMode = true;
-    }
+    bool isRelayAction = false;
     
     if (command == "RELAY_INV_ON") {
         digitalWrite(RELAY_Inv, HIGH);
         Serial3.println("RELAY_INV_STATUS:ON");
+        isRelayAction = true;
     }
     else if (command == "RELAY_INV_OFF") {
         digitalWrite(RELAY_Inv, LOW);
         Serial3.println("RELAY_INV_STATUS:OFF");
+        isRelayAction = true;
     }
     else if (command == "RELAY_BATT_ON") {
         digitalWrite(RELAY_Batt, HIGH);
         Serial3.println("RELAY_BATT_STATUS:ON");
+        isRelayAction = true;
     }
     else if (command == "RELAY_BATT_OFF") {
         digitalWrite(RELAY_Batt, LOW);
         Serial3.println("RELAY_BATT_STATUS:OFF");
+        isRelayAction = true;
     }
     else if (command == "RELAY_ATS_N_ON") {
         digitalWrite(RELAY_ATS_N, HIGH);
         Serial3.println("RELAY_ATS_N_STATUS:ON");
+        isRelayAction = true;
     }
     else if (command == "RELAY_ATS_N_OFF") {
         digitalWrite(RELAY_ATS_N, LOW);
         Serial3.println("RELAY_ATS_N_STATUS:OFF");
+        isRelayAction = true;
     }
     else if (command == "RELAY_ATS_F_ON") {
         digitalWrite(RELAY_ATS_F, HIGH);
         Serial3.println("RELAY_ATS_F_STATUS:ON");
+        isRelayAction = true;
     }
     else if (command == "RELAY_ATS_F_OFF") {
         digitalWrite(RELAY_ATS_F, LOW);
         Serial3.println("RELAY_ATS_F_STATUS:OFF");
+        isRelayAction = true;
     }
     else if (command == "GET_RELAY_STATUS") {
         String s = "RELAY_STATUS:INV=";
@@ -537,10 +543,16 @@ void handleRelayCommand(String command) {
     else if (command == "DISABLE_AUTO_CONTROL") {
         manualControlMode = true;
         Serial3.println("AUTO_CONTROL:DISABLED");
+        return;
     }
     else if (command == "ENABLE_AUTO_CONTROL") {
         manualControlMode = false;
         Serial3.println("AUTO_CONTROL:ENABLED");
+        return;
+    }
+
+    if (isRelayAction) {
+        manualControlMode = true;
     }
 }
 
